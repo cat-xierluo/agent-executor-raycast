@@ -3,3 +3,13 @@ dist
 .env
 *.log
 .DS_Store
+
+# Ignore all log files and directories
+logs/*.jsonl
+logs/*.log
+logs/*.txt
+logs/*.json
+logs/*.sh
+
+# Ignore auto-generated CLAUDE.md files in subdirectories
+**/CLAUDE.md

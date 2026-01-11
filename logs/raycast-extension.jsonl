@@ -1,3 +1,0 @@
-{"ts":"2026-01-11 16:27:07","event":"started","status":"running","run_id":"run_20260111_162707_4093","target":"/Users/maoking/Downloads/2025123100132.pdf","work_dir":"/Users/maoking/Library/Application Support/maoscripts/AutoWeave"}
-{"ts":"2026-01-11 16:27:07","event":"validated","status":"success","run_id":"run_20260111_162707_4093"}
-{"ts":"2026-01-11 16:27:07","event":"executing","status":"running","run_id":"run_20260111_162707_4093","cmd":"/legal-preprocess '/Users/maoking/Downloads/2025123100132.pdf'"}
