@@ -340,6 +340,7 @@ export default function CommandList() {
           workDir: projectDir,  // 使用项目目录
           projectDir: projectDir, // 使用命令所属的项目目录
           claudeBin: config.claudeBin,
+          headlessMode: config.headlessMode,
         },
         logger  // 传递 logger 以启用实时日志
       );
@@ -356,7 +357,12 @@ export default function CommandList() {
 
       if (result.success) {
         await toast.hide();
-        await showHUD(`✅ ${command.title} 完成 (${Math.round(result.duration / 1000)}s)`);
+        // 可见模式显示不同的提示
+        if (config.headlessMode) {
+          await showHUD(`✅ ${command.title} 完成 (${Math.round(result.duration / 1000)}s)`);
+        } else {
+          await showHUD(`🖥️ ${command.title} 已在 Terminal 窗口中执行`);
+        }
         await closeMainWindow();
       } else {
         toast.style = Toast.Style.Failure;

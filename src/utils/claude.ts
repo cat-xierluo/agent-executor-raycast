@@ -1,12 +1,13 @@
 import { spawn, execSync } from "child_process";
 import { join, resolve } from "path";
 import { homedir, tmpdir } from "os";
-import { readFileSync, readdirSync, existsSync, unlinkSync } from "fs";
+import { readFileSync, readdirSync, existsSync, unlinkSync, writeFileSync, chmodSync } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 
 export interface AgentExecutorConfig {
   projectDirs: string[];  // 改为数组，支持多个项目目录
   claudeBin: string;
+  headlessMode: boolean;
 }
 
 export interface Preferences {
@@ -16,6 +17,7 @@ export interface Preferences {
   projectDir4?: string;
   projectDir5?: string;
   claudeBin?: string;
+  headlessMode?: boolean;
 }
 
 /**
@@ -79,9 +81,13 @@ export function loadConfig(): AgentExecutorConfig {
 
   const claudeBin = (prefs.claudeBin || "~/.local/bin/claude").replace(/^~/, homedir());
 
+  // headlessMode 默认为 true（向后兼容）
+  const headlessMode = prefs.headlessMode !== false;
+
   return {
     projectDirs: validDirs,
     claudeBin,
+    headlessMode,
   };
 }
 
@@ -100,6 +106,7 @@ export interface ClaudeExecutionOptions {
   workDir: string;
   projectDir: string;
   claudeBin?: string;
+  headlessMode?: boolean;
 }
 
 export interface ClaudeExecutionResult {
@@ -115,10 +122,53 @@ export async function executeClaudeCommand(
   options: ClaudeExecutionOptions,
   logger?: { startRealtimeLogging: () => void; logRealtime: (chunk: string) => void; logExecuting?: (prompt: string, pid?: number) => void }
 ): Promise<ClaudeExecutionResult> {
-  const { projectDir, claudeBin: customClaudeBin, prompt, workDir } = options;
+  const { projectDir, claudeBin: customClaudeBin, prompt, workDir, headlessMode = true } = options;
   const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
 
   const startTime = Date.now();
+
+  // 如果不是无头模式，直接 spawn 进程（不使用 --print 标志）
+  // 如果 Claude Code 自动打开窗口，就成功了；否则用户看不到输出
+  if (!headlessMode) {
+    return new Promise((resolve) => {
+      try {
+        // 直接执行 Claude Code（不使用 --print，让它以交互模式运行）
+        const child = spawn(claudeBin, prompt.split(' '), {
+          cwd: projectDir,
+          env: { ...process.env },
+          detached: true,  // 让进程独立运行
+          stdio: 'ignore',  // 不连接到父进程的 stdio
+          shell: false,
+        });
+
+        // 进程成功启动
+        child.unref();  // 让父进程不等待子进程
+
+        if (logger && logger.logExecuting) {
+          logger.logExecuting(prompt, child.pid);
+        }
+
+        const duration = Date.now() - startTime;
+        resolve({
+          success: true,
+          output: "(已启动 Claude Code - 如果未看到窗口，请启用后台模式)",
+          exitCode: 0,
+          duration,
+          pid: child.pid,
+        });
+      } catch (error: any) {
+        const duration = Date.now() - startTime;
+        resolve({
+          success: false,
+          output: error.message || "启动失败",
+          error: error.message,
+          exitCode: 1,
+          duration,
+          pid: undefined,
+        });
+      }
+    });
+  }
 
   // 创建临时文件用于捕获输出
   const tempOutputFile = join(tmpdir(), `claude-output-${Date.now()}-${process.pid}.log`);
@@ -132,14 +182,15 @@ export async function executeClaudeCommand(
     let pid: number | undefined;
 
     try {
-      // 使用 bash 包装，通过管道和 tee 命令同时捕获输出
-      // 这种方式比 script 更可靠，且不需要 TTY
-      const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print --dangerously-skip-permissions "${prompt.replace(/"/g, '\\"')}" 2>&1 | tee "${tempOutputFile}"; exit \${PIPESTATUS[0]}`;
+      // 使用 bash 包装，直接重定向到文件（不使用 tee，避免 Cloud Code 进入交互模式）
+      // 2>&1 将 stderr 重定向到 stdout，然后 > 重定向到文件
+      const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print --dangerously-skip-permissions "${prompt.replace(/"/g, '\\"')}" > "${tempOutputFile}" 2>&1`;
 
       const child = spawn('/bin/bash', ['-c', bashCommand], {
         cwd: projectDir,
         env: { ...process.env },
         detached: false,
+        stdio: 'ignore',  // 不使用父进程的 stdio
       });
 
       pid = child.pid;
@@ -149,45 +200,8 @@ export async function executeClaudeCommand(
         logger.logExecuting(prompt, pid);
       }
 
-      // 轮询检查临时文件以实现"伪实时"输出
-      let lastSize = 0;
-      let pollingActive = true;
-      const pollingInterval = setInterval(() => {
-        if (!pollingActive) {
-          clearInterval(pollingInterval);
-          return;
-        }
-
-        try {
-          if (existsSync(tempOutputFile)) {
-            const stats = require('fs').statSync(tempOutputFile);
-            const currentSize = stats.size;
-
-            if (currentSize > lastSize) {
-              // 有新内容，读取增量部分
-              const fd = require('fs').openSync(tempOutputFile, 'r');
-              const buffer = Buffer.alloc(currentSize - lastSize);
-              require('fs').readSync(fd, buffer, 0, buffer.length, lastSize);
-              require('fs').closeSync(fd);
-
-              const newChunk = buffer.toString('utf-8');
-              lastSize = currentSize;
-
-              // 实时写入日志
-              if (logger) {
-                logger.logRealtime(newChunk);
-              }
-            }
-          }
-        } catch (error) {
-          // 忽略读取错误（可能文件正在写入）
-        }
-      }, 500); // 每500ms检查一次
-
       // 监听进程结束
       child.on("close", (code) => {
-        pollingActive = false;
-        clearInterval(pollingInterval);
 
         const duration = Date.now() - startTime;
         let output = "";
@@ -197,12 +211,6 @@ export async function executeClaudeCommand(
           // 读取完整输出
           if (existsSync(tempOutputFile)) {
             output = readFileSync(tempOutputFile, 'utf-8');
-
-            // 如果还有新内容，最后一次写入日志
-            if (output.length > lastSize && logger) {
-              const finalChunk = output.substring(lastSize);
-              logger.logRealtime(finalChunk);
-            }
           }
 
           // 清理临时文件
@@ -222,9 +230,6 @@ export async function executeClaudeCommand(
       });
 
       child.on("error", (error) => {
-        pollingActive = false;
-        clearInterval(pollingInterval);
-
         const duration = Date.now() - startTime;
 
         // 清理临时文件
@@ -244,34 +249,39 @@ export async function executeClaudeCommand(
 
       // 5 分钟后超时
       setTimeout(() => {
-        if (pollingActive) {
-          pollingActive = false;
-          clearInterval(pollingInterval);
-          child.kill();
-
-          const duration = Date.now() - startTime;
-
-          // 尝试读取已有输出
-          let output = "命令执行超时（5分钟）";
-          try {
-            if (existsSync(tempOutputFile)) {
-              const partialOutput = readFileSync(tempOutputFile, 'utf-8');
-              if (partialOutput) {
-                output = `${partialOutput}\n\n[命令执行超时]`;
-              }
-              unlinkSync(tempOutputFile);
-            }
-          } catch {}
-
-          resolve({
-            success: false,
-            output,
-            error: "Timeout after 5 minutes",
-            exitCode: -1,
-            duration,
-            pid,
-          });
+        // 检查子进程是否仍在运行
+        try {
+          process.kill(pid!, 0); // 发送信号 0 检查进程是否存在
+        } catch {
+          // 进程已结束，不需要超时处理
+          return;
         }
+
+        // 进程仍在运行，强制终止
+        child.kill();
+
+        const duration = Date.now() - startTime;
+
+        // 尝试读取已有输出
+        let output = "命令执行超时（5分钟）";
+        try {
+          if (existsSync(tempOutputFile)) {
+            const partialOutput = readFileSync(tempOutputFile, 'utf-8');
+            if (partialOutput) {
+              output = `${partialOutput}\n\n[命令执行超时]`;
+            }
+            unlinkSync(tempOutputFile);
+          }
+        } catch {}
+
+        resolve({
+          success: false,
+          output,
+          error: "Timeout after 5 minutes",
+          exitCode: -1,
+          duration,
+          pid,
+        });
       }, 300000);
     } catch (error: any) {
       // 启动失败

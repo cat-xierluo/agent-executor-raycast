@@ -67,6 +67,14 @@
       "title": "Claude CLI 可执行文件路径",
       "description": "可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude）",
       "default": "~/.local/bin/claude"
+    },
+    {
+      "name": "headlessMode",
+      "type": "checkbox",
+      "required": false,
+      "title": "后台运行模式",
+      "description": "启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。",
+      "default": true
     }
   ],
   "dependencies": {

@@ -19,7 +19,9 @@ type ExtensionPreferences = {
   /** 项目目录 5 - 第五个项目目录（可选） */
   "projectDir5"?: string,
   /** Claude CLI 可执行文件路径 - 可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude） */
-  "claudeBin": string
+  "claudeBin": string,
+  /** 后台运行模式 - 启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。 */
+  "headlessMode": boolean
 }
 
 /** Preferences accessible in all the extension's commands */
