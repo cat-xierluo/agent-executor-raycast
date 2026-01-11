@@ -1,0 +1,91 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "agent-executor",
+  "title": "Agent Executor",
+  "description": "执行 Claude Code 技能和命令的通用工具",
+  "icon": "terminal.png",
+  "author": "maoking",
+  "categories": [
+    "Productivity",
+    "Developer Tools"
+  ],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "commands",
+      "title": "Agent Executor",
+      "description": "选择命令并输入附加留言后执行",
+      "mode": "view"
+    },
+    {
+      "name": "status",
+      "title": "Agent 运行状态",
+      "description": "查看命令执行历史、运行状态和统计信息",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "projectDir1",
+      "type": "directory",
+      "required": true,
+      "title": "项目目录",
+      "description": "包含 .claude/commands/ 的项目目录（必填）"
+    },
+    {
+      "name": "projectDir2",
+      "type": "directory",
+      "required": false,
+      "title": "项目目录 2",
+      "description": "第二个项目目录（可选）"
+    },
+    {
+      "name": "projectDir3",
+      "type": "directory",
+      "required": false,
+      "title": "项目目录 3",
+      "description": "第三个项目目录（可选）"
+    },
+    {
+      "name": "projectDir4",
+      "type": "directory",
+      "required": false,
+      "title": "项目目录 4",
+      "description": "第四个项目目录（可选）"
+    },
+    {
+      "name": "projectDir5",
+      "type": "directory",
+      "required": false,
+      "title": "项目目录 5",
+      "description": "第五个项目目录（可选）"
+    },
+    {
+      "name": "claudeBin",
+      "type": "textfield",
+      "required": false,
+      "title": "Claude CLI 可执行文件路径",
+      "description": "可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude）",
+      "default": "~/.local/bin/claude"
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.103.3",
+    "@raycast/utils": "^2.2.1"
+  },
+  "devDependencies": {
+    "@raycast/eslint-config": "^2.0.4",
+    "@types/node": "22.13.10",
+    "@types/react": "19.0.10",
+    "eslint": "^9.22.0",
+    "prettier": "^3.5.3",
+    "typescript": "^5.8.2"
+  },
+  "scripts": {
+    "build": "ray build",
+    "dev": "ray develop",
+    "fix-lint": "ray lint --fix",
+    "lint": "ray lint",
+    "typescript": "tsc --noEmit"
+  }
+}
