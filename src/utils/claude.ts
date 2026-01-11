@@ -1,7 +1,7 @@
-import { spawn } from "child_process";
+import { spawn, execSync } from "child_process";
 import { join, resolve } from "path";
-import { homedir } from "os";
-import { readFileSync, readdirSync, existsSync } from "fs";
+import { homedir, tmpdir } from "os";
+import { readFileSync, readdirSync, existsSync, unlinkSync } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 
 export interface AgentExecutorConfig {
@@ -120,91 +120,177 @@ export async function executeClaudeCommand(
 
   const startTime = Date.now();
 
-  // 启动实时日志流 - 已禁用，改为仅使用JSONL日志
-  // if (logger) {
-  //   logger.startRealtimeLogging();
-  // }
+  // 创建临时文件用于捕获输出
+  const tempOutputFile = join(tmpdir(), `claude-output-${Date.now()}-${process.pid}.log`);
+
+  // 启动实时日志流
+  if (logger) {
+    logger.startRealtimeLogging();
+  }
 
   return new Promise((resolve) => {
-    let stdout = "";
-    let stderr = "";
+    let pid: number | undefined;
 
-    // 使用 spawn 启动子进程，这样可以获取 PID
-    const child = spawn(claudeBin, [
-      "--print",
-      "--dangerously-skip-permissions",
-      prompt,
-    ], {
-      cwd: projectDir,
-      env: { ...process.env },
-    });
+    try {
+      // 使用 bash 包装，通过管道和 tee 命令同时捕获输出
+      // 这种方式比 script 更可靠，且不需要 TTY
+      const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print --dangerously-skip-permissions "${prompt.replace(/"/g, '\\"')}" 2>&1 | tee "${tempOutputFile}"; exit \${PIPESTATUS[0]}`;
 
-    const pid = child.pid;
-
-    // 立即记录执行开始事件（在进程启动后）
-    if (logger && logger.logExecuting) {
-      logger.logExecuting(prompt, pid);
-    }
-
-    child.stdout?.on("data", (data) => {
-      const chunk = data.toString();
-      stdout += chunk;
-
-      // 实时写入日志 - 已禁用，改为仅使用JSONL日志
-      // if (logger) {
-      //   logger.logRealtime(chunk);
-      // }
-    });
-
-    child.stderr?.on("data", (data) => {
-      const chunk = data.toString();
-      stderr += chunk;
-
-      // 实时写入日志（包括 stderr）- 已禁用，改为仅使用JSONL日志
-      // if (logger) {
-      //   logger.logRealtime(chunk);
-      // }
-    });
-
-    child.on("close", (code) => {
-      const duration = Date.now() - startTime;
-      const combinedOutput = stderr ? `${stdout}\n\n=== 错误信息 ===\n${stderr}` : stdout;
-
-      resolve({
-        success: code === 0,
-        output: combinedOutput,
-        error: stderr || undefined,
-        exitCode: code || 0,
-        duration,
-        pid,
+      const child = spawn('/bin/bash', ['-c', bashCommand], {
+        cwd: projectDir,
+        env: { ...process.env },
+        detached: false,
       });
-    });
 
-    child.on("error", (error) => {
+      pid = child.pid;
+
+      // 立即记录执行开始事件（在进程启动后）
+      if (logger && logger.logExecuting) {
+        logger.logExecuting(prompt, pid);
+      }
+
+      // 轮询检查临时文件以实现"伪实时"输出
+      let lastSize = 0;
+      let pollingActive = true;
+      const pollingInterval = setInterval(() => {
+        if (!pollingActive) {
+          clearInterval(pollingInterval);
+          return;
+        }
+
+        try {
+          if (existsSync(tempOutputFile)) {
+            const stats = require('fs').statSync(tempOutputFile);
+            const currentSize = stats.size;
+
+            if (currentSize > lastSize) {
+              // 有新内容，读取增量部分
+              const fd = require('fs').openSync(tempOutputFile, 'r');
+              const buffer = Buffer.alloc(currentSize - lastSize);
+              require('fs').readSync(fd, buffer, 0, buffer.length, lastSize);
+              require('fs').closeSync(fd);
+
+              const newChunk = buffer.toString('utf-8');
+              lastSize = currentSize;
+
+              // 实时写入日志
+              if (logger) {
+                logger.logRealtime(newChunk);
+              }
+            }
+          }
+        } catch (error) {
+          // 忽略读取错误（可能文件正在写入）
+        }
+      }, 500); // 每500ms检查一次
+
+      // 监听进程结束
+      child.on("close", (code) => {
+        pollingActive = false;
+        clearInterval(pollingInterval);
+
+        const duration = Date.now() - startTime;
+        let output = "";
+        let exitCode = code || 0;
+
+        try {
+          // 读取完整输出
+          if (existsSync(tempOutputFile)) {
+            output = readFileSync(tempOutputFile, 'utf-8');
+
+            // 如果还有新内容，最后一次写入日志
+            if (output.length > lastSize && logger) {
+              const finalChunk = output.substring(lastSize);
+              logger.logRealtime(finalChunk);
+            }
+          }
+
+          // 清理临时文件
+          if (existsSync(tempOutputFile)) unlinkSync(tempOutputFile);
+        } catch (error) {
+          // 清理失败不影响结果
+        }
+
+        resolve({
+          success: exitCode === 0,
+          output: output || "(无输出)",
+          error: exitCode !== 0 ? output : undefined,
+          exitCode,
+          duration,
+          pid,
+        });
+      });
+
+      child.on("error", (error) => {
+        pollingActive = false;
+        clearInterval(pollingInterval);
+
+        const duration = Date.now() - startTime;
+
+        // 清理临时文件
+        try {
+          if (existsSync(tempOutputFile)) unlinkSync(tempOutputFile);
+        } catch {}
+
+        resolve({
+          success: false,
+          output: error.message,
+          error: error.message,
+          exitCode: 1,
+          duration,
+          pid,
+        });
+      });
+
+      // 5 分钟后超时
+      setTimeout(() => {
+        if (pollingActive) {
+          pollingActive = false;
+          clearInterval(pollingInterval);
+          child.kill();
+
+          const duration = Date.now() - startTime;
+
+          // 尝试读取已有输出
+          let output = "命令执行超时（5分钟）";
+          try {
+            if (existsSync(tempOutputFile)) {
+              const partialOutput = readFileSync(tempOutputFile, 'utf-8');
+              if (partialOutput) {
+                output = `${partialOutput}\n\n[命令执行超时]`;
+              }
+              unlinkSync(tempOutputFile);
+            }
+          } catch {}
+
+          resolve({
+            success: false,
+            output,
+            error: "Timeout after 5 minutes",
+            exitCode: -1,
+            duration,
+            pid,
+          });
+        }
+      }, 300000);
+    } catch (error: any) {
+      // 启动失败
       const duration = Date.now() - startTime;
+
+      // 清理临时文件
+      try {
+        if (existsSync(tempOutputFile)) unlinkSync(tempOutputFile);
+      } catch {}
+
       resolve({
         success: false,
-        output: error.message,
+        output: error.message || "执行失败",
         error: error.message,
         exitCode: 1,
         duration,
         pid,
       });
-    });
-
-    // 5 分钟后超时
-    setTimeout(() => {
-      child.kill();
-      const duration = Date.now() - startTime;
-      resolve({
-        success: false,
-        output: "命令执行超时（5分钟）",
-        error: "Timeout after 5 minutes",
-        exitCode: -1,
-        duration,
-        pid,
-      });
-    }, 300000);
+    }
   });
 }
 

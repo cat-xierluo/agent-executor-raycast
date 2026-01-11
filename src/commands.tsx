@@ -317,9 +317,9 @@ export default function CommandList() {
       logger.logValidated();
       console.log(`[executeCommand] Logger validated, Run ID: ${logger.getRunId()}`);
 
-      // 启动实时日志流 - 已禁用，改为仅使用JSONL日志
-      // logger.startRealtimeLogging();
-      console.log(`[executeCommand] JSONL logging enabled`);
+      // 启动实时日志流
+      logger.startRealtimeLogging();
+      console.log(`[executeCommand] Realtime logging started`);
 
       // 构建命令参数
       let prompt = `/${command.name}`;

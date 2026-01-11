@@ -54,8 +54,17 @@ function checkProcessOutput(pid: number, runId: string, targetPath: string): boo
     // 1. 检查JSONL日志中是否有输出内容
     const entries = readLogEntries();
     const runEntries = entries.filter(entry => entry.runId === runId);
+
+    // 检查是否有完成事件的输出
     const completedEntry = runEntries.find(entry => entry.event === "completed" || entry.event === "failed");
     if (completedEntry && completedEntry.output && completedEntry.output.length > 0) {
+      return true;
+    }
+
+    // 检查是否有实时输出事件
+    const realtimeOutputs = runEntries.filter(entry => entry.event === "realtime_output");
+    if (realtimeOutputs.length > 0) {
+      // 如果有实时输出,说明进程有活动
       return true;
     }
 
@@ -345,14 +354,38 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
       if (processInfo.status === 'completed') {
         status = "completed";
         endTime = new Date(); // 使用当前时间作为结束时间
-        duration = endTime.getTime() - startTime.getTime();
+        duration = (endTime.getTime() - startTime.getTime()) / 1000; // 转换为秒
         console.log(`[extractRunInfo] 检测到PID ${pid} 已完成，基于输出内容判定状态`);
+
+        // 写入completed事件到JSONL,避免下次再计算
+        const { writeJsonLog } = require('./logger');
+        writeJsonLog("completed", "success", runId, {
+          duration: duration,
+          pid: pid,
+          target: targetFullPath,
+          work_dir: targetDirectory,
+          cmd: command,
+          output: "(通过PID检测判定完成)",
+        });
       } else if (processInfo.status === 'failed') {
         status = "failed";
         endTime = new Date();
-        duration = endTime.getTime() - startTime.getTime();
+        duration = (endTime.getTime() - startTime.getTime()) / 1000; // 转换为秒
         exitCode = -2; // 表示基于检测判定为失败
         console.log(`[extractRunInfo] 检测到PID ${pid} 已失败，基于进程状态判定`);
+
+        // 写入failed事件到JSONL,避免下次再计算
+        const { writeJsonLog } = require('./logger');
+        writeJsonLog("failed", "error", runId, {
+          duration: duration,
+          exit_code: exitCode,
+          pid: pid,
+          target: targetFullPath,
+          work_dir: targetDirectory,
+          cmd: command,
+          output: "(通过PID检测判定失败)",
+          reason: "pid_detection",
+        });
       } else {
         status = "running";
         console.log(`[extractRunInfo] 检测到PID ${pid} 仍在运行`);

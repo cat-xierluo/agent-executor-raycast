@@ -25,6 +25,100 @@ interface LogEntry {
   pid?: string;
 }
 
+/**
+ * 从 JSONL 日志中读取所有日志条目并转换为 LogEntry 格式
+ */
+function parseJsonlLog(): LogEntry[] {
+  if (!existsSync(JSONL_LOG)) {
+    return [];
+  }
+
+  try {
+    const content = readFileSync(JSONL_LOG, "utf-8");
+    const lines = content.trim().split("\n");
+
+    // 按 run_id 分组
+    const runGroups = new Map<string, any[]>();
+
+    lines.forEach((line) => {
+      try {
+        const parsed = JSON.parse(line);
+        const runId = parsed.run_id;
+        if (runId) {
+          if (!runGroups.has(runId)) {
+            runGroups.set(runId, []);
+          }
+          runGroups.get(runId)!.push(parsed);
+        }
+      } catch (error) {
+        // 跳过无法解析的行
+      }
+    });
+
+    // 转换为 LogEntry 格式
+    const entries: LogEntry[] = [];
+
+    for (const [runId, events] of runGroups) {
+      // 按时间戳排序
+      events.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+
+      // 查找关键事件
+      const startedEvent = events.find((e) => e.event === "started");
+      const executingEvent = events.find((e) => e.event === "executing");
+      const completedEvent = events.find((e) => e.event === "completed" || e.event === "failed");
+
+      if (!startedEvent) {
+        continue;
+      }
+
+      const status = completedEvent?.event === "completed" ? "成功" : (completedEvent?.event === "failed" ? "失败" : "未知");
+      const targetPath = completedEvent?.target || executingEvent?.target || startedEvent?.target || "";
+      const filename = targetPath.split("/").pop() || runId;
+
+      // 处理执行时长
+      let duration = "未知";
+      if (completedEvent?.duration !== undefined) {
+        // duration 应该是秒（来自 logger.ts），如果大于 1000，可能是毫秒
+        const durationNum = typeof completedEvent.duration === 'number' ? completedEvent.duration : parseFloat(completedEvent.duration);
+        if (!isNaN(durationNum)) {
+          if (durationNum > 1000) {
+            // 如果大于 1000，可能是毫秒，转换为秒
+            duration = `${(durationNum / 1000).toFixed(1)}秒`;
+          } else {
+            duration = `${durationNum.toFixed(1)}秒`;
+          }
+        }
+      } else if ((status === "成功" || status === "失败") && completedEvent?.ts && startedEvent?.ts) {
+        // 如果有完成事件但没有 duration，从时间戳计算
+        const start = new Date(startedEvent.ts);
+        const end = new Date(completedEvent.ts);
+        const durationMs = end.getTime() - start.getTime();
+        if (durationMs > 0) {
+          duration = `${(durationMs / 1000).toFixed(1)}秒`;
+        }
+      }
+
+      const pid = executingEvent?.pid?.toString();
+
+      entries.push({
+        timestamp: startedEvent.ts,
+        status,
+        runId,
+        filename,
+        duration,
+        logPath: join(RUNS_DIR, `${runId}.log`),
+        pid,
+      });
+    }
+
+    // 按时间戳倒序排列（最新的在前）
+    return entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  } catch (error) {
+    console.error("Failed to parse JSONL log:", error);
+    return [];
+  }
+}
+
 interface LogDetail {
   runId: string;
   startTime: string;
@@ -71,6 +165,13 @@ function getPidFromJsonL(runId: string): string | undefined {
 }
 
 function parseIndexFile(): LogEntry[] {
+  // 首先尝试从 JSONL 日志读取（新的统一格式）
+  const jsonlEntries = parseJsonlLog();
+  if (jsonlEntries.length > 0) {
+    return jsonlEntries;
+  }
+
+  // 如果 JSONL 日志为空，尝试从旧的索引文件读取（向后兼容）
   if (!existsSync(INDEX_FILE)) {
     return [];
   }
@@ -203,8 +304,47 @@ function parseRunLog(logPath: string): LogDetail | null {
     const targetPath = completedEntry?.target || executingEntry?.target || startedEntry?.target || "未知";
     const workDir = completedEntry?.work_dir || executingEntry?.work_dir || startedEntry?.work_dir || "未知";
     const command = completedEntry?.cmd || executingEntry?.cmd || "未知";
-    const output = completedEntry?.output || "无输出";
-    const duration = completedEntry?.duration ? `${completedEntry.duration.toFixed(1)}秒` : "未知";
+
+    // 构建输出内容:
+    // 1. 如果有完成事件,使用完成事件的output
+    // 2. 否则,收集所有realtime_output事件的内容
+    let output = "无输出";
+    if (completedEntry?.output) {
+      output = completedEntry.output;
+    } else {
+      // 收集所有实时输出事件
+      const realtimeOutputs = runEntries
+        .filter((e) => e.event === "realtime_output")
+        .map((e) => e.output)
+        .filter((o) => o);
+      if (realtimeOutputs.length > 0) {
+        output = realtimeOutputs.join("");
+      }
+    }
+
+    // 处理执行时长
+    let duration = "未知";
+    if (completedEntry?.duration !== undefined) {
+      // duration 应该是秒（来自 logger.ts），如果大于 1000，可能是毫秒
+      const durationNum = typeof completedEntry.duration === 'number' ? completedEntry.duration : parseFloat(completedEntry.duration);
+      if (!isNaN(durationNum)) {
+        if (durationNum > 1000) {
+          // 如果大于 1000，可能是毫秒，转换为秒
+          duration = `${(durationNum / 1000).toFixed(1)}秒`;
+        } else {
+          duration = `${durationNum.toFixed(1)}秒`;
+        }
+      }
+    } else if (completedEntry && completedEntry.ts && startedEntry?.ts) {
+      // 如果有完成事件但没有 duration，从时间戳计算
+      const start = new Date(startedEntry.ts);
+      const end = new Date(completedEntry.ts);
+      const durationMs = end.getTime() - start.getTime();
+      if (durationMs > 0) {
+        duration = `${(durationMs / 1000).toFixed(1)}秒`;
+      }
+    }
+
     const exitCode = completedEntry?.exit_code || 0;
 
     return {
@@ -247,12 +387,12 @@ export default function LogsViewer() {
     const intervalId = setInterval(() => {
       const detail = parseRunLog(selectedLogPath);
       if (detail) {
-        setSelectedLog(detail);
-
-        // 检查是否已完成（有结束时间）
+        // 如果有完成事件，说明任务已经结束，停止实时监控
         if (detail.endTime !== "未知") {
           setIsRunning(false);
         }
+        // 始终更新日志内容以显示实时输出
+        setSelectedLog(detail);
       }
     }, 1000);
 
@@ -387,7 +527,7 @@ ${selectedLog.pid ? `- **进程 PID**: ${selectedLog.pid}` : ''}
                     ? "未知"
                     : formatTimeForDisplay(selectedLog.endTime))
               }
-- **执行时长**: ${selectedLog.duration}秒${isRunning ? " *(计算中)*" : ""}
+- **执行时长**: ${selectedLog.duration}${isRunning ? " *(计算中)*" : ""}
 - **退出码**: ${isRunning ? "*(等待完成)*" : (selectedLog.exitCode === 0 ? "✅ 成功" : "❌ 失败 (" + selectedLog.exitCode + ")")}
 
 ## 文件信息
@@ -428,7 +568,7 @@ ${selectedLog.output}
                   />
                   <List.Item.Detail.Metadata.Label
                     title="执行时长"
-                    text={isRunning ? "计算中..." : `${selectedLog.duration}秒`}
+                    text={isRunning ? "计算中..." : selectedLog.duration}
                   />
                   <List.Item.Detail.Metadata.Separator />
                   <List.Item.Detail.Metadata.Label

@@ -14,7 +14,7 @@ import { getAllRunStatus, RunInfo, countRunningCommands, clearAllHistory } from 
 import { readFileSync, existsSync, appendFileSync } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
-import { JSONL_LOG, formatLocalTime } from "./utils/logger";
+import { JSONL_LOG, LOG_DIR, formatLocalTime } from "./utils/logger";
 import { GlobalStatsItem } from "./components/StatsComponents";
 import { useStatusRefresh } from "./contexts/StatusRefreshContext";
 
@@ -388,13 +388,105 @@ export function LogDetail({ run }: LogDetailProps) {
 
   async function loadLogContent() {
     try {
-      if (!existsSync(run.logPath)) {
-        setLogContent("日志文件不存在");
+      // 从 JSONL 日志中读取内容
+      const jsonlPath = join(LOG_DIR, "raycast-extension.jsonl");
+
+      if (!existsSync(jsonlPath)) {
+        setLogContent("JSONL 日志文件不存在");
         setIsLoading(false);
         return;
       }
 
-      const content = readFileSync(run.logPath, "utf-8");
+      const jsonlContent = readFileSync(jsonlPath, "utf-8");
+      const lines = jsonlContent.trim().split("\n");
+
+      // 查找该 runId 的所有事件
+      const runEntries = lines
+        .map((line) => {
+          try {
+            return JSON.parse(line);
+          } catch {
+            return null;
+          }
+        })
+        .filter((entry) => entry && entry.run_id === run.runId);
+
+      if (runEntries.length === 0) {
+        setLogContent("未找到该任务的日志记录");
+        setIsLoading(false);
+        return;
+      }
+
+      // 提取信息
+      const startedEntry = runEntries.find((e) => e.event === "started");
+      const executingEntry = runEntries.find((e) => e.event === "executing");
+      const completedEntry = runEntries.find((e) => e.event === "completed" || e.event === "failed");
+
+      // 构建日志内容
+      let logLines: string[] = [];
+      logLines.push("========================================");
+      logLines.push("Agent Executor - 运行日志");
+      logLines.push("========================================");
+      logLines.push(`Run ID: ${run.runId}`);
+      if (startedEntry?.ts) {
+        logLines.push(`开始时间: ${startedEntry.ts}`);
+      }
+      if (run.pid) {
+        logLines.push(`进程 PID: ${run.pid}`);
+      }
+      if (run.targetPath) {
+        logLines.push(`目标路径: ${run.targetPath}`);
+      }
+      if (run.workDir) {
+        logLines.push(`工作目录: ${run.workDir}`);
+      }
+      if (executingEntry?.cmd) {
+        logLines.push(`命令: ${executingEntry.cmd}`);
+      }
+      logLines.push("----------------------------------------");
+      logLines.push("");
+      logLines.push("执行输出:");
+      logLines.push("========================================");
+
+      // 收集输出
+      let output = "";
+      if (completedEntry?.output) {
+        output = completedEntry.output;
+      } else {
+        // 收集所有实时输出事件
+        const realtimeOutputs = runEntries
+          .filter((e) => e.event === "realtime_output")
+          .map((e) => e.output)
+          .filter((o) => o);
+        if (realtimeOutputs.length > 0) {
+          output = realtimeOutputs.join("");
+        }
+      }
+
+      if (output) {
+        logLines.push(output);
+      } else {
+        logLines.push("(无输出)");
+      }
+
+      logLines.push("========================================");
+      logLines.push("");
+      if (completedEntry?.ts) {
+        logLines.push(`结束时间: ${completedEntry.ts}`);
+      }
+      if (completedEntry?.duration !== undefined) {
+        const duration = typeof completedEntry.duration === 'number'
+          ? completedEntry.duration
+          : parseFloat(completedEntry.duration);
+        if (!isNaN(duration)) {
+          logLines.push(`执行时长: ${duration.toFixed(1)}秒`);
+        }
+      }
+      if (completedEntry?.exit_code !== undefined) {
+        logLines.push(`退出码: ${completedEntry.exit_code}`);
+      }
+
+      const content = logLines.join("\n");
       setLogContent(content);
 
       // 如果已经有内容了，就不再显示 loading

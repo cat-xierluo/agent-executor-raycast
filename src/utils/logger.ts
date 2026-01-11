@@ -6,7 +6,7 @@ import { getRunId } from "./claude";
 // 使用 Raycast 扩展支持目录存放日志（每个用户独立）
 const LOG_DIR = join(environment.supportPath, "logs");
 const RUNS_DIR = join(LOG_DIR, "runs");
-const JSONL_LOG = join(LOG_DIR, "agent-executor.jsonl");
+const JSONL_LOG = join(LOG_DIR, "raycast-extension.jsonl");
 const ERROR_LOG = join(LOG_DIR, "errors.log");
 const INDEX_FILE = join(LOG_DIR, "index.txt");
 
@@ -186,6 +186,7 @@ export class RunLogger {
   private runLogPath: string;
   private pid: number | undefined;
   private headerWritten: boolean = false;  // 跟踪头部是否已写入
+  private realtimeOutput: string = "";  // 存储实时输出内容
 
   constructor(targetPath: string, workDir: string) {
     this.runId = getRunId();
@@ -209,14 +210,16 @@ export class RunLogger {
 
   /**
    * 启动实时日志流
-   * 创建一个可写流，用于实时写入日志内容
-   * 注意：此时PID可能还未获取，头部会在setLogHeader中更新
+   * 注意：现在只写入JSONL，不创建.log文件
    */
   startRealtimeLogging(): void {
     ensureLogDirs();
 
-    // 先创建可写流（不写入头部）
-    this.logStream = createWriteStream(this.runLogPath, { flags: 'w' });
+    // 写入启动事件到JSONL
+    writeJsonLog("started_realtime", "running", this.runId, {
+      target: this.targetPath,
+      work_dir: this.workDir,
+    });
   }
 
   /**
@@ -252,47 +255,30 @@ ${this.pid ? `进程 PID: ${this.pid}` : '进程 PID: 启动中...'}
    * @param chunk 日志片段
    */
   logRealtime(chunk: string): void {
-    if (this.logStream) {
-      // 如果头部还未写入，先写入头部
-      if (!this.headerWritten) {
-        this.setLogHeader();
-        this.headerWritten = true;
-      }
-      this.logStream.write(chunk);
-    }
+    // 存储到内存中（用于实时显示）
+    this.realtimeOutput += chunk;
+
+    // 写入到JSONL日志（用于持久化）
+    writeJsonLog("realtime_output", "running", this.runId, {
+      output: chunk,
+      pid: this.pid,
+    });
   }
 
   /**
-   * 停止实时日志流并完成日志文件
+   * 获取实时输出内容
+   * @returns 实时输出内容
+   */
+  getRealtimeOutput(): string {
+    return this.realtimeOutput;
+  }
+
+  /**
+   * 停止实时日志流
    */
   stopRealtimeLogging(output: string, exitCode: number): void {
-    if (this.logStream) {
-      // 如果头部还未写入，先写入头部
-      const wasHeaderWritten = this.headerWritten;
-      if (!wasHeaderWritten) {
-        this.setLogHeader();
-        this.headerWritten = true;
-      }
-
-      const endTime = formatLocalTime(new Date());
-      const duration = Date.now() - this.startTime;
-
-      // 如果有输出但之前没有写入（因为头部还未写入），现在写入输出
-      if (output && !wasHeaderWritten) {
-        this.logStream.write(output);
-      }
-
-      const footer = `
-========================================
-
-结束时间: ${endTime}
-执行时长: ${duration / 1000}秒
-退出码: ${exitCode}
-`;
-
-      this.logStream.end(footer);
-      this.logStream = null;
-    }
+    // 实时日志流已经停止，不需要额外操作
+    // 所有数据已经写入JSONL
   }
 
   /**
@@ -334,6 +320,9 @@ ${this.pid ? `进程 PID: ${this.pid}` : '进程 PID: 启动中...'}
       this.stopRealtimeLogging(output, exitCode);
     }
 
+    // 使用实时积累的输出内容,如果没有则使用传入的output
+    const finalOutput = this.realtimeOutput || output;
+
     if (exitCode === 0) {
       writeJsonLog("completed", "success", this.runId, {
         duration: duration / 1000,
@@ -341,7 +330,7 @@ ${this.pid ? `进程 PID: ${this.pid}` : '进程 PID: 启动中...'}
         target: this.targetPath,
         work_dir: this.workDir,
         cmd: this.prompt || "未知命令",
-        output: output.substring(0, 10000), // 限制输出长度，避免JSONL文件过大
+        output: finalOutput.substring(0, 10000), // 限制输出长度，避免JSONL文件过大
       });
       updateIndex(this.runId, this.targetPath, "SUCCESS", duration);
     } else {
@@ -352,10 +341,10 @@ ${this.pid ? `进程 PID: ${this.pid}` : '进程 PID: 启动中...'}
         target: this.targetPath,
         work_dir: this.workDir,
         cmd: this.prompt || "未知命令",
-        output: output.substring(0, 10000), // 限制输出长度，避免JSONL文件过大
+        output: finalOutput.substring(0, 10000), // 限制输出长度，避免JSONL文件过大
         reason: "execution_error",
       });
-      writeErrorLog(this.runId, this.targetPath, this.workDir, output, exitCode);
+      writeErrorLog(this.runId, this.targetPath, this.workDir, finalOutput, exitCode);
       updateIndex(this.runId, this.targetPath, "FAILED", duration);
     }
   }

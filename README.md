@@ -36,7 +36,7 @@ agent-executor-raycast/
 │   ├── status.tsx          # 状态追踪页面
 │   ├── utils/
 │   │   ├── commands.ts     # 命令扫描逻辑(支持@include)
-│   │   ├── claude.ts       # Claude Code CLI 执行
+│   │   ├── claude.ts       # Claude Code CLI 执行 (headless mode)
 │   │   ├── logger.ts       # 日志记录
 │   │   ├── status.ts       # 状态追踪工具函数
 │   │   └── ...
@@ -46,6 +46,33 @@ agent-executor-raycast/
 ├── tsconfig.json
 └── README.md
 ```
+
+## ⚙️ 前提条件
+
+在使用本扩展之前，你需要：
+
+1. **安装 Claude Code CLI**
+
+   本扩展依赖 Claude Code CLI 来执行命令。请确保已安装并配置好 Claude Code CLI。
+
+   ```bash
+   # 检查 Claude CLI 是否已安装
+   which claude
+   # 或
+   ~/.local/bin/claude --version
+   ```
+
+   如果尚未安装，请访问 [Claude Code CLI 文档](https://code.claude.com/docs/en/headless) 获取安装指南。
+
+2. **创建项目目录结构**
+
+   确保你的项目包含 `.claude/commands/` 目录，并在其中创建命令文件（`.md` 格式）。
+
+3. **配置 Raycast 扩展设置**
+
+   安装本扩展后，需要在 Raycast 扩展设置中配置：
+   - **项目目录**：包含 `.claude/commands/` 的项目路径
+   - **Claude CLI 路径**（可选）：如果 CLI 不在默认路径 `~/.local/bin/claude`
 
 ## 🚀 快速开始
 
@@ -167,6 +194,44 @@ description: 对特定主题进行深度研究和分析
 │  ✅ 引号确保路径中的空格被正确处理                          │
 └─────────────────────────────────────────────────────────┘
 ```
+
+### Headless Mode 执行机制
+
+本扩展使用 Claude Code CLI 的 **headless mode** 来执行命令。Headless mode 允许在非交互式环境中运行 Claude Code，这对于 Raycast 扩展这样的后台执行场景至关重要。
+
+**核心特性：**
+
+- ✅ **非交互式执行**：命令在后台执行，无需用户交互
+- ✅ **实时输出捕获**：通过管道和 `tee` 命令捕获完整的终端输出
+- ✅ **进程管理**：支持 PID 追踪、进程状态监控和强制终止
+- ✅ **JSONL 日志流**：所有执行事件实时写入 JSONL 格式日志
+
+**执行流程：**
+```typescript
+// 1. 使用 headless mode 参数启动 Claude CLI
+spawn(claudeBin, [
+  "--print",                          // headless mode 输出标志
+  "--dangerously-skip-permissions",   // 跳过权限确认（自动化场景）
+  prompt,                             // 命令 + 文件路径
+], {
+  cwd: projectDir,                    // 设置工作目录
+  stdio: ["pipe", "pipe", "pipe"]     // 捕获 stdin/stdout/stderr
+})
+
+// 2. 通过管道和 tee 实现输出捕获
+// - realtime_output 事件：实时输出流
+// - full_output 事件：完整输出（命令结束后）
+// - 支持终端 ANSI 颜色和格式化输出
+```
+
+**关键技术点：**
+
+- **TTY 输出捕获**：使用 `tee` 命令确保捕获完整的终端输出（包括 ANSI 控制码）
+- **JSONL 事件流**：每个执行事件（开始、输出、结束）都作为独立的 JSON 行记录
+- **PID 检测**：从 Claude CLI 输出中自动提取 Agent PID，用于进程管理
+- **优雅终止**：支持通过 PID kill 正在运行的命令
+
+参考实现：[src/utils/claude.ts](agent-executor-raycast/src/utils/claude.ts)
 
 ### 完整执行流程示例
 
