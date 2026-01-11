@@ -11,5 +11,6 @@ logs/*.txt
 logs/*.json
 logs/*.sh
 
-# Ignore auto-generated CLAUDE.md files in subdirectories
+# Ignore auto-generated CLAUDE.md files
+CLAUDE.md
 **/CLAUDE.md
