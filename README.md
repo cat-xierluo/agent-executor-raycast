@@ -369,30 +369,44 @@ claude "/deepresearch \"~/Documents/cases/case001.pdf\""  # 告诉 Claude 要处
 
 ## 📊 日志系统
 
-扩展会自动记录所有命令执行历史，保存在 `logs/agent-executor.jsonl` 文件中。
+扩展使用 **JSONL 格式**记录所有命令执行历史，保存在 `logs/raycast-extension.jsonl` 文件中。
+
+### 日志目录结构
+
+```text
+~/Library/Application Support/maoscripts/AutoWeave/agent-executor-raycast/logs/
+├── raycast-extension.jsonl  # JSONL 格式的结构化日志（主要日志文件）
+└── stats.json               # 运行统计信息
+```
+
+**注意**：系统已完全迁移到 JSONL-only 日志记录方式，不再使用传统的 `.log` 文件或索引文件。
 
 ### 日志查看
 
-在 Raycast 中运行 "查看运行状态" 命令,可以:
+在 Raycast 中运行 "查看运行状态" 命令，可以：
+
 - 查看所有运行历史
 - 按时间倒序排列
 - 查看每次运行的详细信息
 - 复制运行 ID
 - 在 Finder 中打开日志文件
+- 实时查看正在运行的命令输出
 
 ### 日志内容
 
-每个运行日志包含:
-- Run ID(唯一标识符)
+每个运行日志包含：
+
+- Run ID（唯一标识符）
+- 进程 ID（PID）
 - 开始/结束时间
 - 执行时长
 - 目标文件路径
 - 工作目录
 - 执行命令
-- 完整输出
+- 完整输出（实时输出流 + 最终输出）
 - 退出码
 
-详细的日志系统说明请参阅 [详细使用指南](docs/DETAILED_GUIDE.md#-日志系统详解)。
+详细的日志系统说明请参阅 [详细使用指南 - 日志系统详解](docs/DETAILED_GUIDE.md#-日志系统详解)。
 
 ## 📊 状态追踪系统
 

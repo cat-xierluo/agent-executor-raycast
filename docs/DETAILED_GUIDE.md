@@ -77,13 +77,11 @@ description: 对特定主题进行深度研究和分析
 
 ```
 ~/Library/Application Support/maoscripts/AutoWeave/agent-executor-raycast/logs/
-├── agent-executor.jsonl  # JSONL 格式的结构化日志
-├── errors.log               # 错误日志
-├── index.txt                # 运行索引(时间倒序)
-└── runs/                    # 每次运行的详细日志
-    ├── run_20260110_152000_1234.log
-    └── ...
+├── raycast-extension.jsonl  # JSONL 格式的结构化日志（主要日志文件）
+└── stats.json               # 运行统计信息
 ```
+
+**注意**：系统已完全迁移到 JSONL-only 日志记录方式。不再使用 `runs/` 目录、`index.txt` 或 `errors.log` 文件。
 
 ### 日志查看
 
@@ -98,28 +96,71 @@ description: 对特定主题进行深度研究和分析
 
 每个运行日志包含:
 - Run ID(唯一标识符)
+- 进程 ID（PID）
 - 开始/结束时间
 - 执行时长
 - 目标文件路径
 - 工作目录
 - 执行命令
-- 完整输出
+- 完整输出（实时输出流 + 最终输出）
 - 退出码
 
-### JSONL 格式示例
+### JSONL 格式说明
+
+**每行一个 JSON 对象**，表示一次运行的一个事件。所有日志按时间顺序追加到同一个文件中。
+
+#### 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `ts` | string | 时间戳，格式：`YYYY-MM-DD HH:mm:ss` |
+| `event` | string | 事件类型（见下方事件类型） |
+| `status` | string | 状态：`running` / `success` / `error` |
+| `run_id` | string | 唯一运行标识符，格式：`run_YYYYMMDD_HHMMSS_PID` |
+| `target` | string | 目标文件路径 |
+| `work_dir` | string | 工作目录 |
+| `cmd` | string | 执行的命令 |
+| `pid` | number | 进程 ID |
+| `output` | string | 命令输出（可能被截断） |
+| `duration` | number | 执行时长（秒） |
+| `exit_code` | number | 退出码（失败事件） |
+
+#### JSONL 格式示例
 
 ```json
-{"timestamp":"2026-01-10T15:20:00.123Z","event":"started","runId":"20260110_152000_1234","command":"deepresearch","filePath":"~/Documents/cases/case001.pdf","projectDir":"~/maoscripts/AutoWeave","pid":12345}
-{"timestamp":"2026-01-10T15:20:05.456Z","event":"executing","runId":"20260110_152000_1234","output":"正在分析文件..."}
-{"timestamp":"2026-01-10T15:21:30.789Z","event":"completed","runId":"20260110_152000_1234","exitCode":0,"duration":90.666}
+{"ts":"2026-01-10 17:31:26","event":"started","status":"running","run_id":"run_20260110_173126_4093","target":"/path/to/file.pdf","work_dir":"/path/to"}
+{"ts":"2026-01-10 17:31:27","event":"started_realtime","status":"running","run_id":"run_20260110_173126_4093","target":"/path/to/file.pdf","work_dir":"/path/to"}
+{"ts":"2026-01-10 17:31:27","event":"executing","status":"running","run_id":"run_20260110_173126_4093","cmd":"/legal-router \"/path/to/file.pdf\"","pid":12345}
+{"ts":"2026-01-10 17:31:28","event":"realtime_output","status":"running","run_id":"run_20260110_173126_4093","output":"正在分析文件...","pid":12345}
+{"ts":"2026-01-10 17:31:30","event":"realtime_output","status":"running","run_id":"run_20260110_173126_4093","output":"正在生成报告...","pid":12345}
+{"ts":"2026-01-10 17:31:59","event":"completed","status":"success","run_id":"run_20260110_173126_4093","duration":33.4,"pid":12345,"target":"/path/to/file.pdf","work_dir":"/path/to","cmd":"/legal-router \"/path/to/file.pdf\"","output":"转换完成..."}
 ```
 
 ### 事件类型
 
-- `started`: 命令开始执行
-- `executing`: 命令执行中(实时输出)
-- `completed`: 命令成功完成
-- `failed`: 命令执行失败
+| 事件 | 说明 |
+|------|------|
+| `started` | 命令开始执行 |
+| `started_realtime` | 实时日志流启动 |
+| `validated` | 命令参数验证通过 |
+| `executing` | 命令正在执行（包含 PID） |
+| `realtime_output` | 实时输出片段 |
+| `completed` | 命令成功完成 |
+| `failed` | 命令执行失败 |
+
+### 日志读取方式
+
+**直接读取 JSONL 文件**：
+```bash
+# 查看最近 10 条日志
+tail -n 10 ~/Library/Application\ Support/maoscripts/AutoWeave/agent-executor-raycast/logs/raycast-extension.jsonl
+
+# 查看特定运行的日志
+grep "run_20260110_173126_4093" ~/Library/Application\ Support/maoscripts/AutoWeave/agent-executor-raycast/logs/raycast-extension.jsonl | jq
+```
+
+**在 Raycast 中查看**：
+- 使用 "查看运行状态" 命令，界面会自动解析和展示 JSONL 日志
 
 ---
 
