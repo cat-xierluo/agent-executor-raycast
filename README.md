@@ -19,6 +19,7 @@
 - **智能提取**: 自动从命令文件中提取标题、描述和图标
 
 ### 📋 命令管理原则
+
 **重要**: 本扩展不应硬编码任何特定命令。所有命令都通过扫描 `.claude/commands/` 目录动态生成。
 
 添加新命令的步骤:
@@ -72,6 +73,7 @@ npm run build
 ## 📝 动态命令系统
 
 ### 命令来源
+
 所有命令都从 `.claude/commands/` 目录动态加载:
 
 ```
@@ -300,27 +302,9 @@ claude "/deepresearch \"~/Documents/cases/case001.pdf\""  # 告诉 Claude 要处
 - ✅ 无需手动指定，系统自动识别
 - ✅ 支持跨项目命令协作
 
-### 技术实现细节
-
-核心代码位于：
-- **命令扫描**：[src/utils/commands.ts:127](src/utils/commands.ts#L127) - 扫描并记录 `projectDir`
-- **参数构建**：[src/commands.tsx:339](src/commands.tsx#L339) - 使用 `command.projectDir`
-- **文件路径处理**：[src/commands.tsx:323](src/commands.tsx#L323) - 用引号包裹文件路径
-- **实际执行**：[src/utils/claude.ts:140](src/utils/claude.ts#L140) - 设置 `cwd` 并传递 prompt
-
 ## 📊 日志系统
 
-### 日志目录结构
-
-```
-~/Library/Application Support/maoscripts/AutoWeave/agent-executor-raycast/logs/
-├── agent-executor.jsonl  # JSONL 格式的结构化日志
-├── errors.log               # 错误日志
-├── index.txt                # 运行索引(时间倒序)
-└── runs/                    # 每次运行的详细日志
-    ├── run_20260110_152000_1234.log
-    └── ...
-```
+扩展会自动记录所有命令执行历史，保存在 `logs/agent-executor.jsonl` 文件中。
 
 ### 日志查看
 
@@ -343,20 +327,18 @@ claude "/deepresearch \"~/Documents/cases/case001.pdf\""  # 告诉 Claude 要处
 - 完整输出
 - 退出码
 
+详细的日志系统说明请参阅 [详细使用指南](docs/DETAILED_GUIDE.md#-日志系统详解)。
+
 ## 📊 状态追踪系统
 
-### 概述
+状态追踪系统提供了对命令执行历史的完整可视化:
 
-状态追踪系统提供了对命令执行历史的完整可视化，让你能够：
-
-- 查看所有正在运行的命令
-- 浏览最近 7 天的命令执行历史
-- 查看每次运行的详细日志
-- 快速诊断失败命令的原因
+- **查看所有正在运行的命令**
+- **浏览最近 7 天的命令执行历史**
+- **查看每次运行的详细日志**
+- **快速诊断失败命令的原因**
 
 ### 访问方式
-
-状态追踪页面可以通过两种方式访问：
 
 1. **独立命令**: 在 Raycast 中搜索并运行 "运行状态" 命令
 2. **从命令列表跳转**: 在命令列表页面按下 `Cmd+S` 或点击 "查看运行状态"
@@ -365,61 +347,11 @@ claude "/deepresearch \"~/Documents/cases/case001.pdf\""  # 告诉 Claude 要处
 
 状态页面将命令执行记录分为三类：
 
-#### 正在运行 (Running)
+- **正在运行 (Running)**: 显示所有正在执行中的命令，每 5 秒自动刷新
+- **已完成 (Completed)**: 显示最近 7 天内成功完成的命令
+- **失败 (Failed)**: 显示最近 7 天内执行失败的命令
 
-- 显示所有正在执行中的命令
-- 显示命令开始时间
-- 每 5 秒自动刷新状态
-- 只显示最近 1 小时内开始运行的命令（避免僵尸进程）
-
-#### 已完成 (Completed)
-
-- 显示最近 7 天内成功完成的命令
-- 显示完成时间和执行时长
-- 可查看完整日志输出
-- 支持复制命令重新执行
-
-#### 失败 (Failed)
-
-- 显示最近 7 天内执行失败的命令
-- 显示退出码和错误信息
-- 可查看详细错误日志
-- 快速诊断失败原因
-
-### 日志详情
-
-点击任意命令记录可以查看详细日志，包括：
-
-- Run ID（唯一标识符）
-- 进程 ID（PID）
-- 完整命令字符串
-- 目标文件路径
-- 开始/结束时间
-- 执行时长
-- 完整输出内容
-- 退出码（失败命令）
-
-**实时日志流**：
-- 正在运行的命令会实时写入日志文件
-- 查看运行中命令的日志时，页面每 2 秒自动刷新
-- 可以看到命令的实时输出，无需等待命令完成
-- 进程 ID 可以用于强制终止卡死的命令（使用 `kill <PID>`）
-
-### 技术实现
-
-状态追踪系统基于以下技术：
-
-- **日志源**: 从 `agent-executor.jsonl` 读取结构化日志
-- **状态识别**: 根据 `event` 字段（started/executing/completed/failed）确定命令状态
-- **时间过滤**: 自动清理超过 7 天的记录
-- **自动刷新**: 每 5 秒更新一次状态（仅在状态页面打开时）
-
-### 设计原则
-
-1. **简单高效**: 不维护额外的状态存储，直接读取日志文件
-2. **跨进程支持**: 多个命令实例同时运行时都能被正确追踪
-3. **自动清理**: 自动过滤旧记录，避免列表过长
-4. **可扩展性**: 架构设计支持未来添加更多状态和过滤选项
+详细的状态追踪说明请参阅 [详细使用指南](docs/DETAILED_GUIDE.md#-状态追踪系统)。
 
 ## 🛠️ 开发
 
@@ -438,18 +370,6 @@ npm run lint
 npm run fix-lint
 ```
 
-## 🔄 与 Script Commands 版本的区别
-
-| 功能 | Script Commands | Extension |
-|------|-----------------|-----------|
-| 获取 Finder 选择 | 需要 AppleScript | 直接使用 `getSelectedFinderItems()` API |
-| 用户界面 | 终端输出 | 丰富的 Raycast UI |
-| 配置 | 修改脚本文件 | Raycast 偏好设置 |
-| 命令管理 | 硬编码在脚本中 | 完全动态加载 |
-| @include 支持 | 不支持 | 完整支持(相对/绝对路径) |
-| 可扩展性 | 较低 | 高(添加命令无需修改代码) |
-| 开发难度 | 简单 | 需要 TypeScript/React |
-
 ## 🎯 设计原则
 
 1. **动态优于静态**: 所有命令通过扫描生成,不硬编码
@@ -460,16 +380,8 @@ npm run fix-lint
 
 ## 📚 相关文档
 
-- [故障排除指南](TROUBLESHOOTING.md) - 详细的问题诊断和解决方案，包含：
-  - 命令未显示
-  - @include 解析失败
-  - Claude CLI 执行问题
-  - DevonThink 集成问题
-  - 日志相关问题
-  - 配置验证失败
-  - 性能优化建议
-  - 调试技巧
-- [CHANGELOG.md](CHANGELOG.md) - 变更历史和关键修复记录
-- [ROADMAP.md](ROADMAP.md) - 开发路线图
+- [详细使用指南](docs/DETAILED_GUIDE.md) - 完整的扩展功能说明，包括动态命令系统、日志系统、状态追踪系统的详细技术细节
+- [故障排除指南](docs/TROUBLESHOOTING.md) - 详细的问题诊断和解决方案
+- [DevonThink 集成](docs/DEVONTHINK_INTEGRATION.md) - DevonThink 集成说明
 - [Raycast API 文档](https://developers.raycast.com/)
 - [Claude Code CLI 文档](https://code.claude.com/docs/en/headless)
