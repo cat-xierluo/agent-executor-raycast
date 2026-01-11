@@ -116,6 +116,7 @@ export interface ClaudeExecutionResult {
   exitCode: number;
   duration: number;
   pid?: number;
+  sessionId?: string;  // Claude Code session ID，用于恢复对话
 }
 
 export async function executeClaudeCommand(
@@ -127,51 +128,97 @@ export async function executeClaudeCommand(
 
   const startTime = Date.now();
 
-  // 如果不是无头模式，直接 spawn 进程（不使用 --print 标志）
-  // 如果 Claude Code 自动打开窗口，就成功了；否则用户看不到输出
+  // 如果不是无头模式，在新的 Terminal 窗口中运行 Claude Code
   if (!headlessMode) {
     return new Promise((resolve) => {
       try {
-        // 直接执行 Claude Code（不使用 --print，让它以交互模式运行）
-        const child = spawn(claudeBin, prompt.split(' '), {
-          cwd: projectDir,
-          env: { ...process.env },
-          detached: true,  // 让进程独立运行
-          stdio: 'ignore',  // 不连接到父进程的 stdio
-          shell: false,
-        });
+        // 创建临时脚本文件，避免复杂的转义问题
+        const scriptPath = join(tmpdir(), `claude-visible-${Date.now()}.sh`);
+        const sessionFile = join(tmpdir(), `claude-session-${Date.now()}.json`);
 
-        // 进程成功启动
-        child.unref();  // 让父进程不等待子进程
+        const scriptContent = `#!/bin/bash
+cd "${projectDir}"
+echo "=== 执行 Claude Code 命令 ==="
+echo "命令: ${prompt}"
+echo ""
+
+# 使用 JSON 输出格式以捕获 session ID
+"${claudeBin}" --print --dangerously-skip-permissions --output-format json "${prompt}" > "${sessionFile}"
+
+# 提取并显示结果和 session ID
+if [ -f "${sessionFile}" ]; then
+  # 提取 session_id
+  SESSION_ID=$(cat "${sessionFile}" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
+
+  # 提取并显示结果
+  cat "${sessionFile}" | grep -o '"result":"[^"]*"' | sed 's/"result":"//' | sed 's/"$//' | sed 's/\\\\n/\\n/g'
+
+  echo ""
+  echo "=== 执行完成 ==="
+  echo "Session ID: $SESSION_ID"
+  echo ""
+  echo "💡 恢复此对话: claude --resume $SESSION_ID"
+  echo "你可以查看上方输出，手动关闭此窗口。"
+
+  # 清理临时文件
+  rm -f "${sessionFile}"
+else
+  echo "执行失败：未生成输出文件"
+fi
+`;
+
+        // 写入脚本文件并设置可执行权限
+        writeFileSync(scriptPath, scriptContent, { mode: 0o755 });
+
+        // 使用简单的 AppleScript 打开 Terminal 并执行脚本
+        const appleScript = `tell application "Terminal"
+  activate
+  do script "${scriptPath}"
+end tell`;
+
+        execSync(`osascript -e '${appleScript}'`);
+
+        // 延迟删除脚本文件，给 Terminal 足够时间读取
+        setTimeout(() => {
+          try {
+            if (existsSync(scriptPath)) {
+              unlinkSync(scriptPath);
+            }
+          } catch (e) {
+            // 忽略删除失败
+          }
+        }, 5000);
 
         if (logger && logger.logExecuting) {
-          logger.logExecuting(prompt, child.pid);
+          logger.logExecuting(prompt, undefined);
         }
 
         const duration = Date.now() - startTime;
         resolve({
           success: true,
-          output: "(已启动 Claude Code - 如果未看到窗口，请启用后台模式)",
+          output: "(已在新的 Terminal 窗口中启动 Claude Code，请查看终端窗口)",
           exitCode: 0,
           duration,
-          pid: child.pid,
+          pid: undefined,
+          sessionId: undefined, // 可视化模式下session ID在终端显示，不返回
         });
       } catch (error: any) {
         const duration = Date.now() - startTime;
         resolve({
           success: false,
-          output: error.message || "启动失败",
+          output: error.message || "启动终端窗口失败",
           error: error.message,
           exitCode: 1,
           duration,
           pid: undefined,
+          sessionId: undefined,
         });
       }
     });
   }
 
-  // 创建临时文件用于捕获输出
-  const tempOutputFile = join(tmpdir(), `claude-output-${Date.now()}-${process.pid}.log`);
+  // 创建临时文件用于捕获输出(使用 JSON 格式以提取 session ID)
+  const tempOutputFile = join(tmpdir(), `claude-output-${Date.now()}-${process.pid}.json`);
 
   // 启动实时日志流
   if (logger) {
@@ -184,7 +231,7 @@ export async function executeClaudeCommand(
     try {
       // 使用 bash 包装，直接重定向到文件（不使用 tee，避免 Cloud Code 进入交互模式）
       // 2>&1 将 stderr 重定向到 stdout，然后 > 重定向到文件
-      const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print --dangerously-skip-permissions "${prompt.replace(/"/g, '\\"')}" > "${tempOutputFile}" 2>&1`;
+      const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print --dangerously-skip-permissions --output-format json "${prompt.replace(/"/g, '\\"')}" > "${tempOutputFile}" 2>&1`;
 
       const child = spawn('/bin/bash', ['-c', bashCommand], {
         cwd: projectDir,
@@ -205,12 +252,34 @@ export async function executeClaudeCommand(
 
         const duration = Date.now() - startTime;
         let output = "";
+        let sessionId: string | undefined;
         let exitCode = code || 0;
 
         try {
           // 读取完整输出
           if (existsSync(tempOutputFile)) {
-            output = readFileSync(tempOutputFile, 'utf-8');
+            const rawOutput = readFileSync(tempOutputFile, 'utf-8');
+
+            // 尝试解析 JSON 输出
+            try {
+              const jsonOutput = JSON.parse(rawOutput);
+
+              // 提取 session_id
+              if (jsonOutput.session_id) {
+                sessionId = jsonOutput.session_id;
+              }
+
+              // 提取实际结果文本
+              if (jsonOutput.result) {
+                output = jsonOutput.result;
+              } else {
+                // 如果没有 result 字段,使用原始输出
+                output = rawOutput;
+              }
+            } catch (parseError) {
+              // JSON 解析失败,使用原始输出(可能是错误信息)
+              output = rawOutput;
+            }
           }
 
           // 清理临时文件
@@ -226,6 +295,7 @@ export async function executeClaudeCommand(
           exitCode,
           duration,
           pid,
+          sessionId,
         });
       });
 

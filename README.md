@@ -161,6 +161,9 @@ description: 对特定主题进行深度研究和分析
 
 - **项目目录**: 包含 `.claude/commands/` 的项目目录（可配置多个）
 - **Claude CLI 路径**: Claude Code CLI 可执行文件路径(默认: `~/.local/bin/claude`)
+- **后台运行模式**: 控制命令执行的可视化方式
+  - ✅ **启用（默认）**: 命令在后台静默运行，输出记录到日志文件
+  - ❌ **禁用**: 在新的 Terminal 窗口中显示执行过程，适合调试和观察实时输出
 
 ## 🎯 核心概念：项目目录与文件路径
 
@@ -195,43 +198,60 @@ description: 对特定主题进行深度研究和分析
 └─────────────────────────────────────────────────────────┘
 ```
 
-### Headless Mode 执行机制
+### CLI 模式执行机制
 
-本扩展使用 Claude Code CLI 的 **headless mode** 来执行命令。Headless mode 允许在非交互式环境中运行 Claude Code，这对于 Raycast 扩展这样的后台执行场景至关重要。
+本扩展使用 Claude Code CLI 的 **CLI 模式**（原称 Headless Mode）来执行命令。CLI 模式允许在非交互式环境中运行 Claude Code，这对于 Raycast 扩展这样的后台执行场景至关重要。
 
-**核心特性：**
+**两种执行模式：**
+
+#### 1. 后台运行模式（默认）
 
 - ✅ **非交互式执行**：命令在后台执行，无需用户交互
-- ✅ **实时输出捕获**：通过管道和 `tee` 命令捕获完整的终端输出
+- ✅ **实时输出捕获**：通过管道捕获完整的终端输出
 - ✅ **进程管理**：支持 PID 追踪、进程状态监控和强制终止
 - ✅ **JSONL 日志流**：所有执行事件实时写入 JSONL 格式日志
 
 **执行流程：**
 ```typescript
-// 1. 使用 headless mode 参数启动 Claude CLI
+// 使用 CLI 模式参数启动 Claude CLI
 spawn(claudeBin, [
-  "--print",                          // headless mode 输出标志
+  "--print",                          // CLI 模式输出标志
   "--dangerously-skip-permissions",   // 跳过权限确认（自动化场景）
   prompt,                             // 命令 + 文件路径
 ], {
   cwd: projectDir,                    // 设置工作目录
   stdio: ["pipe", "pipe", "pipe"]     // 捕获 stdin/stdout/stderr
 })
+```
 
-// 2. 通过管道和 tee 实现输出捕获
-// - realtime_output 事件：实时输出流
-// - full_output 事件：完整输出（命令结束后）
-// - 支持终端 ANSI 颜色和格式化输出
+#### 2. 可视化模式（调试用）
+
+当禁用"后台运行模式"时，命令会在新的 Terminal 窗口中执行：
+
+- 🔍 **实时查看输出**：在终端窗口中观察命令执行过程
+- 🐛 **调试友好**：方便查看完整的执行日志和错误信息
+- 📝 **窗口保持打开**：执行完成后窗口保持打开，可手动关闭
+- ⚡ **使用场景**：程序调试、问题诊断、优化分析
+
+**技术实现：**
+
+```applescript
+-- 使用 AppleScript 在新 Terminal 窗口中执行
+tell application "Terminal"
+  activate
+  do script "cd \"project_dir\" && claude --print \"prompt\""
+end tell
 ```
 
 **关键技术点：**
 
-- **TTY 输出捕获**：使用 `tee` 命令确保捕获完整的终端输出（包括 ANSI 控制码）
+- **TTY 输出捕获**：确保捕获完整的终端输出（包括 ANSI 控制码）
 - **JSONL 事件流**：每个执行事件（开始、输出、结束）都作为独立的 JSON 行记录
 - **PID 检测**：从 Claude CLI 输出中自动提取 Agent PID，用于进程管理
 - **优雅终止**：支持通过 PID kill 正在运行的命令
 
 参考实现：[src/utils/claude.ts](agent-executor-raycast/src/utils/claude.ts)
+参考文档：[Claude Code CLI 模式文档](docs/CLAUDE_CODE_CLI_MODE.md)
 
 ### 完整执行流程示例
 

@@ -141,18 +141,33 @@
 
 **目标**: 提升用户体验，优化性能和稳定性
 
-### 任务清单
+### 已完成任务
 
-| 任务               | 描述                                                                                         | 优先级 | 状态      | 预计完成 |
-| :----------------- | :------------------------------------------------------------------------------------------- | :----- | :-------- | :------- |
-| 文件选择自动更新   | 当在 Finder 或 DevonThink 中选择新文件后，Raycast 界面自动更新显示新选中的文件，无需手动刷新 | 🔴 高  | ⚪ 待开始 | -        |
+| 任务               | 描述                                                                                         | 优先级 | 状态 | 完成时间   |
+| :----------------- | :------------------------------------------------------------------------------------------- | :----- | :--- | :--------- |
+| Session ID 捕获    | 在后台和可视化模式中捕获 Claude Code session ID，支持会话恢复功能                             | 🔴 高  | ✅   | 2026-01-11 |
+| 可视化模式实现     | 使用 AppleScript 在 Terminal 窗口中显示命令执行过程，支持调试和实时输出查看                  | 🔴 高  | ✅   | 2026-01-11 |
+
+### 进行中任务
+
+| 任务                 | 描述                                                                                         | 优先级 | 状态      | 预计完成 |
+| :------------------- | :------------------------------------------------------------------------------------------- | :----- | :-------- | :------- |
+| 环境变量与配置支持   | 支持通过 `--settings` 参数指定配置文件，支持自定义环境变量传递，实现 LLM 端口配置集成       | 🔴 高  | 🟡 规划中 | -        |
+| Session ID 日志集成  | 将 session ID 保存到 JSONL 日志，在状态页面显示，支持从历史记录恢复对话                      | 🔴 高  | ⚪ 待开始 | -        |
+
+### 计划任务
+
+| 任务                 | 描述                                                                                         | 优先级 | 状态      | 预计完成 |
+| :------------------- | :------------------------------------------------------------------------------------------- | :----- | :-------- | :------- |
+| LLM 配置端口集成     | 在 Raycast 配置中添加 LLM 端口设置，通过 settings.json 文件传递给 Claude Code                | 🔴 高  | ⚪ 待开始 | -        |
+| 文件选择自动更新     | 当在 Finder 或 DevonThink 中选择新文件后，Raycast 界面自动更新显示新选中的文件，无需手动刷新 | 🔴 高  | ⚪ 待开始 | -        |
 | 无头模式性能优化   | 禁用非必要 hooks（SessionStart hook 等），优化环境变量传递，减少启动开销                     | 🔴 高  | ⚪ 待开始 | -        |
 | 可见模式性能优化   | 优化终端窗口启动速度，减少 AppleScript 执行延迟，改进进程监控机制                             | 🟡 中  | ⚪ 待开始 | -        |
-| 错误处理增强     | 更友好的错误提示，自动重试机制，错误恢复建议，异常情况处理                                   | 🟡 中  | ⚪ 待开始 | -        |
-| 命令执行进度条   | 实时显示命令执行进度，提升用户体验                                                           | 🟢 低  | ⚪ 待开始 | -        |
-| 详细状态提示     | 提供更详细的状态提示信息，让用户了解当前执行情况                                             | 🟢 低  | ⚪ 待开始 | -        |
-| 快捷操作优化     | 优化快捷键和操作流程，提升操作效率                                                           | 🟢 低  | ⚪ 待开始 | -        |
-| 界面响应速度提升 | 优化界面渲染逻辑，提升响应速度                                                               | 🟢 低  | ⚪ 待开始 | -        |
+| 错误处理增强       | 更友好的错误提示，自动重试机制，错误恢复建议，异常情况处理                                   | 🟡 中  | ⚪ 待开始 | -        |
+| 命令执行进度条     | 实时显示命令执行进度，提升用户体验                                                           | 🟢 低  | ⚪ 待开始 | -        |
+| 详细状态提示       | 提供更详细的状态提示信息，让用户了解当前执行情况                                             | 🟢 低  | ⚪ 待开始 | -        |
+| 快捷操作优化       | 优化快捷键和操作流程，提升操作效率                                                           | 🟢 低  | ⚪ 待开始 | -        |
+| 界面响应速度提升   | 优化界面渲染逻辑，提升响应速度                                                               | 🟢 低  | ⚪ 待开始 | -        |
 
 ### 验收标准
 
@@ -160,6 +175,134 @@
 - 日志查看加载时间 < 1秒
 - 错误提示清晰易懂
 - 用户满意度 > 4.5/5
+
+---
+
+## 阶段六：高级配置功能 ⚪
+
+**目标**: 提供灵活的配置选项，支持高级用户自定义 Claude Code 行为
+
+### 计划功能
+
+#### 1. 配置文件支持
+
+**技术方案**:
+- 在 Raycast preferences 添加可选的 "Claude Settings 文件路径" 配置项
+- 支持 JSON 文件路径或 JSON 字符串两种格式
+- 使用 Claude CLI 的 `--settings` 参数传递配置
+
+**配置文件示例** (`claude-settings.json`):
+```json
+{
+  "dangerouslySkipPermissions": true,
+  "maxTokens": 8192,
+  "model": "claude-sonnet-4-5-20250929",
+  "verbose": false
+}
+```
+
+**实现方式**:
+```typescript
+// 后台模式
+const settingsParam = settingsPath
+  ? `--settings "${settingsPath}"`
+  : '';
+const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print ${settingsParam} --output-format json "${prompt}"`;
+
+// 可视化模式
+const scriptContent = `#!/bin/bash
+cd "${projectDir}"
+"${claudeBin}" --print ${settingsPath ? '--settings "' + settingsPath + '"' : ''} --output-format json "${prompt}"
+`;
+```
+
+#### 2. LLM 端口配置
+
+**应用场景**:
+- 支持本地部署的 LLM 服务（如通过 Ollama、LM Studio 等）
+- 支持自定义 API 端点
+- 支持企业内网 LLM 服务
+
+**配置方式一: 通过环境变量**
+```typescript
+const child = spawn('/bin/bash', ['-c', bashCommand], {
+  cwd: projectDir,
+  env: {
+    ...process.env,
+    ANTHROPIC_API_URL: customApiUrl,  // 自定义 API 端点
+    ANTHROPIC_API_KEY: apiKey,        // API 密钥
+  },
+});
+```
+
+**配置方式二: 通过 settings.json**
+```json
+{
+  "apiUrl": "http://localhost:11434/v1",
+  "model": "claude-3-sonnet",
+  "headers": {
+    "Authorization": "Bearer custom-token"
+  }
+}
+```
+
+#### 3. 自定义环境变量
+
+**Raycast 配置界面**:
+- 添加 "自定义环境变量" 文本框（支持多行）
+- 格式: `KEY=value`，每行一个
+- 示例:
+  ```
+  ANTHROPIC_API_URL=http://localhost:11434/v1
+  ANTHROPIC_API_KEY=sk-custom-key
+  DEBUG=true
+  ```
+
+**实现代码**:
+```typescript
+interface Preferences {
+  // ... 现有配置
+  customEnvVars?: string;  // 自定义环境变量（多行文本）
+}
+
+function parseEnvVars(envString?: string): Record<string, string> {
+  if (!envString) return {};
+
+  return envString.split('\n')
+    .filter(line => line.trim() && !line.startsWith('#'))
+    .reduce((acc, line) => {
+      const [key, ...valueParts] = line.split('=');
+      if (key && valueParts.length > 0) {
+        acc[key.trim()] = valueParts.join('=').trim();
+      }
+      return acc;
+    }, {} as Record<string, string>);
+}
+
+// 使用
+const customEnv = parseEnvVars(prefs.customEnvVars);
+const child = spawn('/bin/bash', ['-c', bashCommand], {
+  env: { ...process.env, ...customEnv },
+});
+```
+
+### 任务清单
+
+| 任务                   | 描述                                               | 优先级 | 状态      |
+| :--------------------- | :------------------------------------------------- | :----- | :-------- |
+| Settings 文件支持      | 支持通过 `--settings` 参数传递配置文件              | 🔴 高  | ⚪ 待开始 |
+| 自定义环境变量         | 在 Raycast 配置中支持自定义环境变量                 | 🔴 高  | ⚪ 待开始 |
+| LLM 端口配置           | 支持配置本地 LLM 服务端点                           | 🔴 高  | ⚪ 待开始 |
+| 配置文件模板           | 提供常见配置场景的模板文件                          | 🟡 中  | ⚪ 待开始 |
+| 配置验证               | 验证配置文件格式和参数有效性                        | 🟡 中  | ⚪ 待开始 |
+
+### 验收标准
+
+- ✅ 支持通过配置文件自定义 Claude Code 行为
+- ✅ 支持配置本地 LLM 服务端点
+- ✅ 支持自定义环境变量传递
+- ✅ 配置错误时提供清晰的错误提示
+- ✅ 兼容所有现有功能（后台模式、可视化模式）
 
 ---
 
@@ -231,9 +374,21 @@
   - 修复 completion 事件缺失问题，任务状态准确显示
   - 添加防御性错误处理，系统稳定可靠
   - 支持日志轮转，长期运行稳定
-- **📋 性能优化规划**: 在阶段五中添加性能优化任务
-  - 无头模式性能优化：禁用非必要 hooks，优化环境变量和启动参数
-  - 可见模式性能优化：优化 AppleScript 执行和进程启动机制
+- **✅ 可视化模式实现**: 完成 Terminal 窗口显示功能
+  - 使用 AppleScript 在新的 Terminal 窗口中执行 Claude Code 命令
+  - 支持实时查看命令执行过程和完整输出
+  - 在配置中添加"后台运行模式"开关，支持调试场景
+  - 窗口保持打开，方便用户查看完整日志
+- **✅ Session ID 捕获**: 实现会话 ID 提取和显示
+  - 后台模式：使用 `--output-format json` 捕获 session_id，保存在执行结果中
+  - 可视化模式：在 Terminal 窗口中显示 session_id 和恢复命令提示
+  - 更新 `ClaudeExecutionResult` 接口，添加 `sessionId` 字段
+  - 为后续会话恢复功能奠定基础
+- **📋 环境变量与配置规划**: 规划 Claude Code 配置文件支持
+  - 发现 Claude CLI 支持 `--settings` 参数指定配置文件
+  - 支持通过环境变量传递自定义配置
+  - 规划在 Raycast 配置中添加配置文件路径选项
+  - 计划实现自定义环境变量传递功能
 
 ### 2026-01-08
 
