@@ -17,6 +17,13 @@ import React, { useState, useEffect, useRef } from "react";
 import { executeClaudeCommand, executeClaudeStreaming, getConfig } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
 import { scanCommands, ClaudeCommand } from "./utils/commands";
+import { scanSkills, ClaudeSkill } from "./utils/skills";
+import {
+  toggleCommandPinned,
+  toggleCommandNew,
+  toggleSkillPinned,
+  toggleSkillNew,
+} from "./utils/commandMetadata";
 import {
   getSelectedDevonThinkRecords,
   checkDevonThinkAvailable,
@@ -29,15 +36,16 @@ import {
 } from "./utils/devonthink";
 import { readdirSync, statSync } from "fs";
 import { join } from "path";
-import { toggleCommandPinned, toggleCommandNew } from "./utils/commandMetadata";
 import { countRunningCommands } from "./utils/status";
 import { recordExecution } from "./utils/stats";
 import StatusList from "./status";
 import { triggerStatusRefresh } from "./contexts/StatusRefreshContext";
 
+// 统一的执行项类型
+type ExecutorItem = ClaudeCommand | ClaudeSkill;
+
 export default function CommandList() {
-  const [commands, setCommands] = useState<ClaudeCommand[]>([]);
-  const [filteredCommands, setFilteredCommands] = useState<ClaudeCommand[]>([]);
+  const [items, setItems] = useState<ExecutorItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
   const [devonThinkRecords, setDevonThinkRecords] = useState<
@@ -83,22 +91,30 @@ export default function CommandList() {
     try {
       const config = getConfig();
       const availableCommands = scanCommands(config.projectDirs);
-      setCommands(availableCommands);
-      setFilteredCommands(availableCommands);
+      const availableSkills = scanSkills(config.projectDirs);
+      // 合并 commands 和 skills
+      const allItems: ExecutorItem[] = [...availableCommands, ...availableSkills];
+      // 排序：置顶的在前，然后是新的，最后按名称排序
+      allItems.sort((a, b) => {
+        if (a.pinned && !b.pinned) return -1;
+        if (!a.pinned && b.pinned) return 1;
+        if (a.isNew && !b.isNew) return -1;
+        if (!a.isNew && b.isNew) return 1;
+        return a.name.localeCompare(b.name);
+      });
+      setItems(allItems);
     } catch (error) {
       const isConfigError =
         error instanceof Error && (error as any).isConfigError;
 
       await showToast({
         style: Toast.Style.Failure,
-        title: isConfigError ? "配置错误" : "加载命令失败",
+        title: isConfigError ? "配置错误" : "加载失败",
         message: error instanceof Error ? error.message : "未知错误",
       });
 
       if (isConfigError) {
-        // 设置空命令列表，避免用户看到过时的命令
-        setCommands([]);
-        setFilteredCommands([]);
+        setItems([]);
       }
     } finally {
       setIsLoading(false);
@@ -541,6 +557,109 @@ export default function CommandList() {
   }
 
   /**
+   * 执行技能
+   */
+  async function executeSkill(skill: ClaudeSkill) {
+    if (processingCommand) {
+      return;
+    }
+
+    // 对于需要文件参数的技能，检查是否选中了文件
+    const validFiles = selectedFiles.filter(
+      (file) => file && file.trim().length > 0,
+    );
+    const executionFile =
+      activeFile && activeFile.trim().length > 0 ? activeFile : validFiles[0];
+
+    setProcessingCommand(skill.name);
+
+    const toast = await showToast({
+      style: Toast.Style.Animated,
+      title: `正在执行：${skill.title}`,
+      message: executionFile ? executionFile.split("/").pop() || "" : "",
+    });
+
+    const executionStartTime = Date.now();
+
+    try {
+      const config = getConfig();
+      const projectDir = skill.projectDir || config.projectDirs[0];
+
+      const logger = new RunLogger(
+        executionFile || skill.name,
+        projectDir,
+      );
+
+      logger.logValidated();
+      logger.startRealtimeLogging();
+
+      // 构建技能调用参数
+      let prompt = `/${skill.name}`;
+      if (executionFile) {
+        prompt += ` "${executionFile}"`;
+      }
+      if (note && note.trim()) {
+        prompt += ` ${note.trim()}`;
+      }
+
+      const result = await executeClaudeCommand(
+        {
+          prompt,
+          workDir: projectDir,
+          projectDir,
+          claudeBin: config.claudeBin,
+          headlessMode: config.headlessMode,
+        },
+        logger,
+      );
+
+      logger.logCompleted(result.output, result.exitCode);
+
+      const executionDuration = Date.now() - executionStartTime;
+      recordExecution(skill.name, result.success, executionDuration);
+
+      if (result.success) {
+        await toast.hide();
+        if (config.headlessMode) {
+          await showHUD(
+            `✅ ${skill.title} 完成 (${Math.round(result.duration / 1000)}s)`,
+          );
+        } else {
+          await showHUD(`🖥️ ${skill.title} 已在 Terminal 窗口中执行`);
+        }
+        await closeMainWindow();
+      } else {
+        toast.style = Toast.Style.Failure;
+        toast.title = "执行失败";
+        toast.message = `退出码: ${result.exitCode}`;
+      }
+    } catch (error) {
+      console.error(`[executeSkill] Error:`, error);
+      toast.style = Toast.Style.Failure;
+      toast.title = "执行失败";
+      toast.message = error instanceof Error ? error.message : "未知错误";
+
+      const executionDuration = Date.now() - executionStartTime;
+      recordExecution(skill.name, false, executionDuration);
+    } finally {
+      setProcessingCommand(null);
+      loadRunningCount();
+      triggerStatusRefresh();
+    }
+  }
+
+  /**
+   * 统一执行函数（根据类型选择执行命令或技能）
+   */
+  async function executeItem(item: ClaudeCommand | ClaudeSkill) {
+    if ('filePath' in item) {
+      await executeCommand(item);
+    } else {
+      await executeSkill(item);
+    }
+  }
+
+  /**
    * 获取文件夹中的文件列表
    */
   function getDirectoryContents(
@@ -634,7 +753,7 @@ export default function CommandList() {
       actions={
         <ActionPanel>
           <Action
-            title="刷新命令列表"
+            title="刷新列表"
             onAction={loadCommands}
             icon={Icon.ArrowClockwise}
             shortcut={{ modifiers: ["cmd"], key: "r" }}
@@ -751,16 +870,16 @@ export default function CommandList() {
         </List.Section>
       )}
 
-      {/* 命令列表 */}
-      {commands.length === 0 ? (
+      {/* 命令/技能列表 */}
+      {items.length === 0 ? (
         <List.EmptyView
           icon={Icon.Warning}
-          title="未找到命令"
-          description="请在 .claude/commands/ 目录中添加命令文件"
+          title="未找到命令或技能"
+          description="请在 .claude/commands/ 或 .claude/skills/ 目录中添加命令文件或技能目录"
         />
       ) : (
         <List.Section
-          title={`可用命令 (${commands.length})`}
+          title={`可用项目 (${items.length})`}
           subtitle={
             selectedFiles.length > 0
               ? `将对 "${activeFile.split("/").pop() || activeFile}" 执行`
@@ -785,71 +904,88 @@ export default function CommandList() {
               }
             />
           )}
-          {commands.map((command) => (
-            <ListItem
-              key={command.filePath}
-              id={command.filePath}
-              title={`${command.pinned ? "📌 " : ""}${command.isNew ? "✨ " : ""}${command.title}`}
-              subtitle={command.description}
-              icon={command.icon}
-              accessories={[
-                {
-                  text:
-                    processingCommand === command.name
-                      ? "执行中..."
-                      : undefined,
-                  icon:
-                    processingCommand === command.name
-                      ? Icon.CircleProgress
-                      : undefined,
-                },
-                command.pinned ? { text: "置顶", icon: Icon.Pin } : null,
-                command.isNew && !command.pinned
-                  ? { text: "新", icon: Icon.Star }
-                  : null,
-                // 显示项目来源
-                command.projectName
-                  ? { text: command.projectName, icon: Icon.Folder }
-                  : null,
-              ].filter(Boolean)}
-              actions={
-                <ActionPanel>
-                  <Action
-                    title="执行命令"
-                    onAction={() => executeCommand(command)}
-                    icon={Icon.Play}
-                    shortcut={{ modifiers: ["cmd"], key: "enter" }}
-                  />
-                  {note && note.trim() && (
+
+          {/* 渲染命令或技能列表 */}
+          {items.map((item) => {
+            const isSkill = 'skillDir' in item;
+            const itemType = isSkill ? 'Skill' : 'Command';
+            return (
+              <ListItem
+                key={isSkill ? item.skillDir : item.filePath}
+                id={isSkill ? item.skillDir : item.filePath}
+                title={`${item.pinned ? "📌 " : ""}${item.isNew ? "✨ " : ""}${item.title}`}
+                subtitle={item.description}
+                icon={item.icon}
+                accessories={[
+                  {
+                    text:
+                      processingCommand === item.name
+                        ? "执行中..."
+                        : undefined,
+                    icon:
+                      processingCommand === item.name
+                        ? Icon.CircleProgress
+                        : undefined,
+                  },
+                  { text: itemType, icon: isSkill ? Icon.Star : Icon.HardDrive },
+                  item.pinned ? { text: "置顶", icon: Icon.Pin } : null,
+                  item.isNew && !item.pinned
+                    ? { text: "新", icon: Icon.Star }
+                    : null,
+                  isSkill && (item as ClaudeSkill).isSymlink
+                    ? { text: "链接", icon: Icon.Link }
+                    : null,
+                  item.projectName
+                    ? { text: item.projectName, icon: Icon.Folder }
+                    : null,
+                ].filter(Boolean)}
+                actions={
+                  <ActionPanel>
                     <Action
-                      title={`执行命令（带备注："${note.trim()}"）`}
-                      onAction={() => executeCommand(command)}
+                      title={`执行${itemType}`}
+                      onAction={() => executeItem(item)}
                       icon={Icon.Play}
-                      shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
+                      shortcut={{ modifiers: ["cmd"], key: "enter" }}
                     />
-                  )}
-                  <Action
-                    title="切换置顶状态"
-                    onAction={() => {
-                      toggleCommandPinned(command.name);
-                      loadCommands();
-                    }}
-                    icon={Icon.Pin}
-                    shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
-                  />
-                  <Action
-                    title="切换新标记"
-                    onAction={() => {
-                      toggleCommandNew(command.name);
-                      loadCommands();
-                    }}
-                    icon={Icon.Star}
-                    shortcut={{ modifiers: ["cmd", "shift"], key: "s" }}
-                  />
-                </ActionPanel>
-              }
-            />
-          ))}
+                    {note && note.trim() && (
+                      <Action
+                        title={`执行${itemType}（带备注："${note.trim()}"）`}
+                        onAction={() => executeItem(item)}
+                        icon={Icon.Play}
+                        shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
+                      />
+                    )}
+                    <Action
+                      title="切换置顶状态"
+                      onAction={() => {
+                        if (isSkill) {
+                          toggleSkillPinned(item.name);
+                        } else {
+                          toggleCommandPinned(item.name);
+                        }
+                        loadCommands();
+                      }}
+                      icon={Icon.Pin}
+                      shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
+                    />
+                    <Action
+                      title="切换新标记"
+                      onAction={() => {
+                        if (isSkill) {
+                          toggleSkillNew(item.name);
+                        } else {
+                          toggleCommandNew(item.name);
+                        }
+                        loadCommands();
+                      }}
+                      icon={Icon.Star}
+                      shortcut={{ modifiers: ["cmd", "shift"], key: "s" }}
+                    />
+                  </ActionPanel>
+                }
+              />
+            );
+          })}
         </List.Section>
       )}
     </List>

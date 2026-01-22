@@ -8,7 +8,7 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
-  /** 项目目录 - 包含 .claude/commands/ 的项目目录（必填） */
+  /** 项目目录 - Agent Executor 插件根目录（必填） */
   "projectDir1": string,
   /** 项目目录 2 - 第二个项目目录（可选） */
   "projectDir2"?: string,

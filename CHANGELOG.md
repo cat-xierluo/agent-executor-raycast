@@ -2,6 +2,51 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [0.3.0] - 2026-01-22
+
+### 新增 (Added)
+
+- **Skills 支持**：扩展现在支持读取和执行 Claude Code Skills
+  - 新增 `src/utils/skills.ts` 模块，实现技能扫描和执行功能
+  - 支持扫描 `.claude/skills/` 目录中的技能子目录
+  - 每个技能目录需包含 `skill.md` 或 `SKILL.md` 定义文件
+  - 自动识别符号链接技能目录，正确处理链接指向的技能文件
+  - 技能调用语法：`/skill-name`，与命令语法保持一致
+  - 技能与命令合并显示在同一列表中，通过类型标签区分（Command / Skill）
+  - 支持技能元数据管理（置顶、新标记等），与命令使用相同的存储机制
+  - 技能显示链接图标标识，方便识别符号链接来源
+
+- **统一的执行列表**：Commands 和 Skills 在同一个界面展示
+  - 列表项第一个 accessories 显示项目类型（Command 硬盘图标 / Skill 星星图标）
+  - 符号链接技能额外显示"链接"标签
+  - 统一的排序逻辑：置顶 > 新标记 > 字母顺序
+  - 统一的执行函数 `executeItem()`，根据类型自动选择执行方式
+
+- **扩展命令元数据接口**：`CommandMetadata` 接口添加 `type` 字段
+  - 区分命令（command）和技能（skill）类型
+  - 技能元数据使用 `skill:` 前缀存储，避免与命令名称冲突
+
+- **新增元数据管理函数**：
+  - `applyMetadataToSkills()` - 应用元数据到技能列表
+  - `toggleSkillPinned()` - 切换技能置顶状态
+  - `toggleSkillNew()` - 切换技能新标记状态
+
+### 修复 (Fixed)
+
+- **符号链接目录扫描问题**：修复无法识别符号链接技能目录的问题
+  - `readdirSync` 返回的符号链接 `isDirectory()` 返回 `false`，导致符号链接被跳过
+  - 修改扫描逻辑同时检查 `isDirectory()` 和 `isSymbolicLink()`
+  - 现在能正确扫描和显示符号链接形式的技能
+
+- **图标兼容性**：修复使用不存在图标导致的构建错误
+  - 移除不存在的图标引用（如 `Icon.Gear`, `Icon.Download`, `Icon.Terminal` 等）
+  - 更新为 Raycast API 实际支持的图标集合
+
+### 变更 (Changed)
+
+- **列表标题**：从"可用命令"更改为"可用项目"，反映包含 Commands 和 Skills
+- **空状态提示**：更新为"未找到命令或技能"
+
 ## [0.2.0] - 2026-01-11
 
 ### 新增 (Added)
