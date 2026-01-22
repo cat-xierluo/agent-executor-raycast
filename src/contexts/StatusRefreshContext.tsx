@@ -14,8 +14,11 @@ class StatusRefreshManager {
 
   refresh() {
     this.version += 1;
-    console.log('[StatusRefreshManager] Refreshing status, version:', this.version);
-    this.listeners.forEach(listener => listener());
+    console.log(
+      "[StatusRefreshManager] Refreshing status, version:",
+      this.version,
+    );
+    this.listeners.forEach((listener) => listener());
   }
 
   getVersion() {

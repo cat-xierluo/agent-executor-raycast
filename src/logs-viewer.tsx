@@ -13,7 +13,13 @@ import {
 import { useState, useEffect } from "react";
 import { readFileSync, existsSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import { LOG_DIR, RUNS_DIR, INDEX_FILE, ERROR_LOG, JSONL_LOG } from "./utils/logger";
+import {
+  LOG_DIR,
+  RUNS_DIR,
+  INDEX_FILE,
+  ERROR_LOG,
+  JSONL_LOG,
+} from "./utils/logger";
 
 interface LogEntry {
   timestamp: string;
@@ -60,26 +66,42 @@ function parseJsonlLog(): LogEntry[] {
 
     for (const [runId, events] of runGroups) {
       // 按时间戳排序
-      events.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
+      events.sort(
+        (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+      );
 
       // 查找关键事件
       const startedEvent = events.find((e) => e.event === "started");
       const executingEvent = events.find((e) => e.event === "executing");
-      const completedEvent = events.find((e) => e.event === "completed" || e.event === "failed");
+      const completedEvent = events.find(
+        (e) => e.event === "completed" || e.event === "failed",
+      );
 
       if (!startedEvent) {
         continue;
       }
 
-      const status = completedEvent?.event === "completed" ? "成功" : (completedEvent?.event === "failed" ? "失败" : "未知");
-      const targetPath = completedEvent?.target || executingEvent?.target || startedEvent?.target || "";
+      const status =
+        completedEvent?.event === "completed"
+          ? "成功"
+          : completedEvent?.event === "failed"
+            ? "失败"
+            : "未知";
+      const targetPath =
+        completedEvent?.target ||
+        executingEvent?.target ||
+        startedEvent?.target ||
+        "";
       const filename = targetPath.split("/").pop() || runId;
 
       // 处理执行时长
       let duration = "未知";
       if (completedEvent?.duration !== undefined) {
         // duration 应该是秒（来自 logger.ts），如果大于 1000，可能是毫秒
-        const durationNum = typeof completedEvent.duration === 'number' ? completedEvent.duration : parseFloat(completedEvent.duration);
+        const durationNum =
+          typeof completedEvent.duration === "number"
+            ? completedEvent.duration
+            : parseFloat(completedEvent.duration);
         if (!isNaN(durationNum)) {
           if (durationNum > 1000) {
             // 如果大于 1000，可能是毫秒，转换为秒
@@ -88,7 +110,11 @@ function parseJsonlLog(): LogEntry[] {
             duration = `${durationNum.toFixed(1)}秒`;
           }
         }
-      } else if ((status === "成功" || status === "失败") && completedEvent?.ts && startedEvent?.ts) {
+      } else if (
+        (status === "成功" || status === "失败") &&
+        completedEvent?.ts &&
+        startedEvent?.ts
+      ) {
         // 如果有完成事件但没有 duration，从时间戳计算
         const start = new Date(startedEvent.ts);
         const end = new Date(completedEvent.ts);
@@ -112,7 +138,10 @@ function parseJsonlLog(): LogEntry[] {
     }
 
     // 按时间戳倒序排列（最新的在前）
-    return entries.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    return entries.sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+    );
   } catch (error) {
     console.error("Failed to parse JSONL log:", error);
     return [];
@@ -150,7 +179,11 @@ function getPidFromJsonL(runId: string): string | undefined {
     for (let i = lines.length - 1; i >= 0; i--) {
       try {
         const parsed = JSON.parse(lines[i]);
-        if (parsed.run_id === runId && parsed.event === "executing" && parsed.pid) {
+        if (
+          parsed.run_id === runId &&
+          parsed.event === "executing" &&
+          parsed.pid
+        ) {
           return parsed.pid.toString();
         }
       } catch (error) {
@@ -182,7 +215,9 @@ function parseIndexFile(): LogEntry[] {
 
   for (const line of lines) {
     // 匹配格式: [2026/1/10 17:31:59] [SUCCESS] run_20260110_173126_4093 - 2025123100132.pdf (33s)
-    const match = line.match(/\[(.*?)\] \[(.*?)\] (run_\d+_\d+_\d+) - (.*?) \((\d+)s\]/);
+    const match = line.match(
+      /\[(.*?)\] \[(.*?)\] (run_\d+_\d+_\d+) - (.*?) \((\d+)s\]/,
+    );
     if (match) {
       const [, timestamp, status, runId, filename, duration] = match;
       const logPath = join(RUNS_DIR, `${runId}.log`);
@@ -222,7 +257,9 @@ function parseIndexFile(): LogEntry[] {
 function parseTimeString(timeStr: string): Date | null {
   try {
     // 尝试解析 "YYYY-MM-DD HH:mm:ss" 格式
-    const match = timeStr.match(/^(\d{4})-(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{1,2}):(\d{1,2})$/);
+    const match = timeStr.match(
+      /^(\d{4})-(\d{1,2})-(\d{1,2}) (\d{1,2}):(\d{1,2}):(\d{1,2})$/,
+    );
     if (match) {
       const [, year, month, day, hours, minutes, seconds] = match;
       return new Date(
@@ -231,7 +268,7 @@ function parseTimeString(timeStr: string): Date | null {
         parseInt(day),
         parseInt(hours),
         parseInt(minutes),
-        parseInt(seconds)
+        parseInt(seconds),
       );
     }
     // 如果解析失败，尝试直接创建Date对象
@@ -253,11 +290,11 @@ function formatTimeForDisplay(timeStr: string): string {
 
   // 始终显示绝对时间格式
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
 
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
@@ -296,13 +333,23 @@ function parseRunLog(logPath: string): LogDetail | null {
     // 提取信息
     const startedEntry = runEntries.find((e) => e.event === "started");
     const executingEntry = runEntries.find((e) => e.event === "executing");
-    const completedEntry = runEntries.find((e) => e.event === "completed" || e.event === "failed");
+    const completedEntry = runEntries.find(
+      (e) => e.event === "completed" || e.event === "failed",
+    );
 
     const startTime = startedEntry?.ts || "未知";
     const endTime = completedEntry?.ts || "未知";
     const pid = executingEntry?.pid?.toString();
-    const targetPath = completedEntry?.target || executingEntry?.target || startedEntry?.target || "未知";
-    const workDir = completedEntry?.work_dir || executingEntry?.work_dir || startedEntry?.work_dir || "未知";
+    const targetPath =
+      completedEntry?.target ||
+      executingEntry?.target ||
+      startedEntry?.target ||
+      "未知";
+    const workDir =
+      completedEntry?.work_dir ||
+      executingEntry?.work_dir ||
+      startedEntry?.work_dir ||
+      "未知";
     const command = completedEntry?.cmd || executingEntry?.cmd || "未知";
 
     // 构建输出内容:
@@ -326,7 +373,10 @@ function parseRunLog(logPath: string): LogDetail | null {
     let duration = "未知";
     if (completedEntry?.duration !== undefined) {
       // duration 应该是秒（来自 logger.ts），如果大于 1000，可能是毫秒
-      const durationNum = typeof completedEntry.duration === 'number' ? completedEntry.duration : parseFloat(completedEntry.duration);
+      const durationNum =
+        typeof completedEntry.duration === "number"
+          ? completedEntry.duration
+          : parseFloat(completedEntry.duration);
       if (!isNaN(durationNum)) {
         if (durationNum > 1000) {
           // 如果大于 1000，可能是毫秒，转换为秒
@@ -467,7 +517,12 @@ export default function LogsViewer() {
       isShowingDetail={selectedLog !== null}
       actions={
         <ActionPanel>
-          <Action title="刷新日志" onAction={loadLogs} icon={Icon.RotateClockwise} shortcut={{ modifiers: ["cmd"], key: "r" }} />
+          <Action
+            title="刷新日志"
+            onAction={loadLogs}
+            icon={Icon.RotateClockwise}
+            shortcut={{ modifiers: ["cmd"], key: "r" }}
+          />
           <Action.Open title="在 Finder 中显示日志目录" target={LOG_DIR} />
         </ActionPanel>
       }
@@ -485,7 +540,10 @@ export default function LogsViewer() {
         />
       ) : (
         <>
-          <List.Section title="运行历史" subtitle={`${logEntries.length} 条记录`}>
+          <List.Section
+            title="运行历史"
+            subtitle={`${logEntries.length} 条记录`}
+          >
             {logEntries.map((entry) => (
               <ListItem
                 key={entry.runId}
@@ -505,8 +563,14 @@ export default function LogsViewer() {
                       icon={Icon.Eye}
                       shortcut={{ modifiers: ["cmd"], key: "enter" }}
                     />
-                  <Action.CopyToClipboard title="复制运行 ID" content={entry.runId} />
-                    <Action.Open title="在 Finder 中显示" target={entry.logPath} />
+                    <Action.CopyToClipboard
+                      title="复制运行 ID"
+                      content={entry.runId}
+                    />
+                    <Action.Open
+                      title="在 Finder 中显示"
+                      target={entry.logPath}
+                    />
                   </ActionPanel>
                 }
               />
@@ -519,16 +583,16 @@ export default function LogsViewer() {
 
 ## 基本信息
 - **开始时间**: ${formatTimeForDisplay(selectedLog.startTime)}
-${selectedLog.pid ? `- **进程 PID**: ${selectedLog.pid}` : ''}
+${selectedLog.pid ? `- **进程 PID**: ${selectedLog.pid}` : ""}
 - **结束时间**: ${
                 isRunning
                   ? "运行中"
-                  : (selectedLog.endTime === "未知"
+                  : selectedLog.endTime === "未知"
                     ? "未知"
-                    : formatTimeForDisplay(selectedLog.endTime))
+                    : formatTimeForDisplay(selectedLog.endTime)
               }
 - **执行时长**: ${selectedLog.duration}${isRunning ? " *(计算中)*" : ""}
-- **退出码**: ${isRunning ? "*(等待完成)*" : (selectedLog.exitCode === 0 ? "✅ 成功" : "❌ 失败 (" + selectedLog.exitCode + ")")}
+- **退出码**: ${isRunning ? "*(等待完成)*" : selectedLog.exitCode === 0 ? "✅ 成功" : "❌ 失败 (" + selectedLog.exitCode + ")"}
 
 ## 文件信息
 - **目标路径**: \`${selectedLog.targetPath}\`
@@ -547,9 +611,15 @@ ${selectedLog.output}
 `}
               metadata={
                 <List.Item.Detail.Metadata>
-                  <List.Item.Detail.Metadata.Label title="Run ID" text={selectedLog.runId} />
+                  <List.Item.Detail.Metadata.Label
+                    title="Run ID"
+                    text={selectedLog.runId}
+                  />
                   {selectedLog.pid && (
-                    <List.Item.Detail.Metadata.Label title="PID" text={selectedLog.pid} />
+                    <List.Item.Detail.Metadata.Label
+                      title="PID"
+                      text={selectedLog.pid}
+                    />
                   )}
                   <List.Item.Detail.Metadata.Separator />
                   <List.Item.Detail.Metadata.Label
@@ -561,9 +631,9 @@ ${selectedLog.output}
                     text={
                       isRunning
                         ? "运行中..."
-                        : (selectedLog.endTime === "未知"
+                        : selectedLog.endTime === "未知"
                           ? "未知"
-                          : formatTimeForDisplay(selectedLog.endTime))
+                          : formatTimeForDisplay(selectedLog.endTime)
                     }
                   />
                   <List.Item.Detail.Metadata.Label
@@ -573,11 +643,26 @@ ${selectedLog.output}
                   <List.Item.Detail.Metadata.Separator />
                   <List.Item.Detail.Metadata.Label
                     title="状态"
-                    text={isRunning ? "运行中" : (selectedLog.exitCode === 0 ? "成功" : "失败")}
-                    icon={isRunning ? Icon.Clock : (selectedLog.exitCode === 0 ? Icon.CheckCircle : Icon.XMarkCircle)}
+                    text={
+                      isRunning
+                        ? "运行中"
+                        : selectedLog.exitCode === 0
+                          ? "成功"
+                          : "失败"
+                    }
+                    icon={
+                      isRunning
+                        ? Icon.Clock
+                        : selectedLog.exitCode === 0
+                          ? Icon.CheckCircle
+                          : Icon.XMarkCircle
+                    }
                   />
                   {!isRunning && (
-                    <List.Item.Detail.Metadata.Label title="退出码" text={String(selectedLog.exitCode)} />
+                    <List.Item.Detail.Metadata.Label
+                      title="退出码"
+                      text={String(selectedLog.exitCode)}
+                    />
                   )}
                 </List.Item.Detail.Metadata>
               }

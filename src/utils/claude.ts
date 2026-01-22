@@ -1,7 +1,13 @@
 import { spawn, execSync } from "child_process";
-import { join, resolve } from "path";
+import { join } from "path";
 import { homedir, tmpdir } from "os";
-import { readFileSync, readdirSync, existsSync, unlinkSync, writeFileSync, chmodSync } from "fs";
+import {
+  readFileSync,
+  existsSync,
+  unlinkSync,
+  writeFileSync,
+  chmodSync,
+} from "fs";
 import { getPreferenceValues } from "@raycast/api";
 
 export interface AgentExecutorConfig {
@@ -57,7 +63,7 @@ export function isValidProjectDir(dir: string): boolean {
  */
 export function getProjectName(dir: string): string {
   // 获取目录的最后一部分作为项目名
-  const parts = dir.split("/").filter(p => p && p !== "");
+  const parts = dir.split("/").filter((p) => p && p !== "");
   const lastName = parts[parts.length - 1] || dir;
 
   // 如果是隐藏目录（以 . 开头），去掉点
@@ -84,7 +90,7 @@ export function loadConfig(): AgentExecutorConfig {
     prefs.projectDir5,
   ].filter(Boolean);
 
-  const projectDirs = rawDirs.map(dir => dir.replace(/^~/, homedir()));
+  const projectDirs = rawDirs.map((dir) => dir.replace(/^~/, homedir()));
 
   // 验证至少有一个有效目录
   const validDirs = projectDirs.filter(isValidProjectDir);
@@ -92,18 +98,21 @@ export function loadConfig(): AgentExecutorConfig {
   if (validDirs.length === 0) {
     const error = new Error(
       `未找到有效的项目目录\n\n` +
-      `请检查：\n` +
-      `1. 至少配置一个有效的项目目录\n` +
-      `2. 目录必须包含 .claude/commands/ 子目录\n\n` +
-      `已配置的目录：\n` +
-      projectDirs.map(d => `  - ${d}`).join("\n") +
-      `\n\n提示：请在 Raycast 扩展设置中重新配置项目目录。`
+        `请检查：\n` +
+        `1. 至少配置一个有效的项目目录\n` +
+        `2. 目录必须包含 .claude/commands/ 子目录\n\n` +
+        `已配置的目录：\n` +
+        projectDirs.map((d) => `  - ${d}`).join("\n") +
+        `\n\n提示：请在 Raycast 扩展设置中重新配置项目目录。`,
     );
     (error as any).isConfigError = true;
     throw error;
   }
 
-  const claudeBin = (prefs.claudeBin || "~/.local/bin/claude").replace(/^~/, homedir());
+  const claudeBin = (prefs.claudeBin || "~/.local/bin/claude").replace(
+    /^~/,
+    homedir(),
+  );
 
   // headlessMode 默认为 true（向后兼容）
   const headlessMode = prefs.headlessMode !== false;
@@ -153,7 +162,7 @@ export interface ClaudeExecutionResult {
   exitCode: number;
   duration: number;
   pid?: number;
-  sessionId?: string;  // Claude Code session ID，用于恢复对话
+  sessionId?: string; // Claude Code session ID，用于恢复对话
 }
 
 /**
@@ -291,9 +300,19 @@ export async function executeClaudeStreaming(
 
 export async function executeClaudeCommand(
   options: ClaudeExecutionOptions,
-  logger?: { startRealtimeLogging: () => void; logRealtime: (chunk: string) => void; logExecuting?: (prompt: string, pid?: number) => void }
+  logger?: {
+    startRealtimeLogging: () => void;
+    logRealtime: (chunk: string) => void;
+    logExecuting?: (prompt: string, pid?: number) => void;
+  },
 ): Promise<ClaudeExecutionResult> {
-  const { projectDir, claudeBin: customClaudeBin, prompt, workDir, headlessMode = true } = options;
+  const {
+    projectDir,
+    claudeBin: customClaudeBin,
+    prompt,
+    workDir,
+    headlessMode = true,
+  } = options;
   const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
 
   const startTime = Date.now();
@@ -388,7 +407,10 @@ end tell`;
   }
 
   // 创建临时文件用于捕获输出(使用 JSON 格式以提取 session ID)
-  const tempOutputFile = join(tmpdir(), `claude-output-${Date.now()}-${process.pid}.json`);
+  const tempOutputFile = join(
+    tmpdir(),
+    `claude-output-${Date.now()}-${process.pid}.json`,
+  );
 
   // 启动实时日志流
   if (logger) {
@@ -403,11 +425,11 @@ end tell`;
       // 2>&1 将 stderr 重定向到 stdout，然后 > 重定向到文件
       const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print --dangerously-skip-permissions --output-format json "${prompt.replace(/"/g, '\\"')}" > "${tempOutputFile}" 2>&1`;
 
-      const child = spawn('/bin/bash', ['-c', bashCommand], {
+      const child = spawn("/bin/bash", ["-c", bashCommand], {
         cwd: projectDir,
         env: { ...process.env },
         detached: false,
-        stdio: 'ignore',  // 不使用父进程的 stdio
+        stdio: "ignore", // 不使用父进程的 stdio
       });
 
       pid = child.pid;
@@ -419,7 +441,6 @@ end tell`;
 
       // 监听进程结束
       child.on("close", (code) => {
-
         const duration = Date.now() - startTime;
         let output = "";
         let sessionId: string | undefined;
@@ -428,7 +449,7 @@ end tell`;
         try {
           // 读取完整输出
           if (existsSync(tempOutputFile)) {
-            const rawOutput = readFileSync(tempOutputFile, 'utf-8');
+            const rawOutput = readFileSync(tempOutputFile, "utf-8");
 
             // 尝试解析 JSON 输出
             try {
@@ -506,7 +527,7 @@ end tell`;
         let output = "命令执行超时（5分钟）";
         try {
           if (existsSync(tempOutputFile)) {
-            const partialOutput = readFileSync(tempOutputFile, 'utf-8');
+            const partialOutput = readFileSync(tempOutputFile, "utf-8");
             if (partialOutput) {
               output = `${partialOutput}\n\n[命令执行超时]`;
             }
@@ -550,92 +571,4 @@ export function getRunId(): string {
   const time = now.toTimeString().split(" ")[0].replace(/:/g, "");
   const pid = process.pid.toString().slice(-4);
   return `run_${date}_${time}_${pid}`;
-}
-
-export interface CommandMetadata {
-  name: string;
-  description: string;
-  filename: string;
-  prompt: string;
-  projectDir?: string; // 命令所属的项目目录
-}
-
-/**
- * 根据命令名称查找其所属的项目目录
- * @param commandName 命令名称（不含斜杠）
- * @param projectDirs 配置的项目目录列表
- * @returns 命令所属的项目目录，如果找不到则返回第一个项目目录
- */
-export function findCommandProjectDir(commandName: string, projectDirs: string[]): string {
-  const commands = getAvailableCommands(projectDirs);
-  const command = commands.find(cmd => cmd.name === commandName);
-  return command?.projectDir || projectDirs[0];
-}
-
-/**
- * 从多个项目目录的 .claude/commands 读取所有可用的命令
- */
-export function getAvailableCommands(projectDirs: string[]): CommandMetadata[] {
-  const allCommands: CommandMetadata[] = [];
-
-  for (const projectDir of projectDirs) {
-    const commandsDir = join(projectDir, ".claude/commands");
-
-    if (!existsSync(commandsDir)) {
-      continue;
-    }
-
-    const files = readdirSync(commandsDir);
-
-    for (const file of files) {
-      if (!file.endsWith(".md") || file === "CLAUDE.md" || file.startsWith("README")) {
-        continue;
-      }
-
-      const filePath = join(commandsDir, file);
-      try {
-        let content = readFileSync(filePath, "utf-8");
-        const commandName = file.replace(".md", "");
-
-        // 检查是否使用了 @include 指令
-        const includeMatch = content.match(/^@include\s+(.+)/);
-        if (includeMatch) {
-          // 处理 @include 指令，读取被引用的实际文件
-          const includePath = includeMatch[1].trim();
-          const referencedFilePath = resolve(commandsDir, includePath);
-
-          if (existsSync(referencedFilePath)) {
-            content = readFileSync(referencedFilePath, "utf-8");
-          } else {
-            // 如果被引用的文件不存在，跳过这个命令
-            continue;
-          }
-        }
-
-        // 解析 frontmatter (--- 包裹的 YAML 元数据)
-        let description = commandName; // 默认使用文件名作为描述
-        const frontmatterMatch = content.match(/^---\n([\s\S]+?)\n---/);
-        if (frontmatterMatch) {
-          const frontmatter = frontmatterMatch[1];
-          const descMatch = frontmatter.match(/description:\s*(.+)/);
-          if (descMatch) {
-            description = descMatch[1].trim().replace(/^["']|["']$/g, "");
-          }
-        }
-
-        allCommands.push({
-          name: commandName,
-          description: description,
-          filename: file,
-          prompt: `/${commandName}`,
-          projectDir, // 添加项目目录信息
-        });
-      } catch (error) {
-        // 跳过无法读取的文件
-        continue;
-      }
-    }
-  }
-
-  return allCommands.sort((a, b) => a.name.localeCompare(b.name));
 }

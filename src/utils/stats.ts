@@ -117,7 +117,11 @@ function initCommandStats(commandName: string): CommandStats {
  * @param success 是否成功
  * @param duration 执行时长（毫秒）
  */
-export function recordExecution(commandName: string, success: boolean, duration: number): void {
+export function recordExecution(
+  commandName: string,
+  success: boolean,
+  duration: number,
+): void {
   const stats = readStats();
 
   // 获取或初始化该命令的统计数据
@@ -135,7 +139,8 @@ export function recordExecution(commandName: string, success: boolean, duration:
   } else {
     cmdStats.failureCount += 1;
   }
-  cmdStats.successRate = (cmdStats.successCount / cmdStats.totalExecutions) * 100;
+  cmdStats.successRate =
+    (cmdStats.successCount / cmdStats.totalExecutions) * 100;
 
   // 更新时长统计
   cmdStats.totalDuration += duration;
@@ -163,7 +168,9 @@ export function getCommandStats(commandName: string): CommandStats | null {
  */
 export function getAllCommandStats(): CommandStats[] {
   const stats = readStats();
-  return Object.values(stats.commands).sort((a, b) => b.totalExecutions - a.totalExecutions);
+  return Object.values(stats.commands).sort(
+    (a, b) => b.totalExecutions - a.totalExecutions,
+  );
 }
 
 /**
@@ -212,17 +219,29 @@ export function getGlobalSummary(): GlobalStatsSummary {
   const stats = readStats();
   const allCommands = Object.values(stats.commands);
 
-  const totalExecutions = allCommands.reduce((sum, cmd) => sum + cmd.totalExecutions, 0);
-  const totalSuccesses = allCommands.reduce((sum, cmd) => sum + cmd.successCount, 0);
-  const totalFailures = allCommands.reduce((sum, cmd) => sum + cmd.failureCount, 0);
+  const totalExecutions = allCommands.reduce(
+    (sum, cmd) => sum + cmd.totalExecutions,
+    0,
+  );
+  const totalSuccesses = allCommands.reduce(
+    (sum, cmd) => sum + cmd.successCount,
+    0,
+  );
+  const totalFailures = allCommands.reduce(
+    (sum, cmd) => sum + cmd.failureCount,
+    0,
+  );
 
-  const mostUsed = allCommands.sort((a, b) => b.totalExecutions - a.totalExecutions)[0];
+  const mostUsed = allCommands.sort(
+    (a, b) => b.totalExecutions - a.totalExecutions,
+  )[0];
 
   return {
     totalExecutions,
     totalSuccesses,
     totalFailures,
-    globalSuccessRate: totalExecutions > 0 ? (totalSuccesses / totalExecutions) * 100 : 0,
+    globalSuccessRate:
+      totalExecutions > 0 ? (totalSuccesses / totalExecutions) * 100 : 0,
     commandCount: allCommands.length,
     mostUsedCommand: mostUsed?.commandName || null,
     lastUpdated: stats.lastUpdated,

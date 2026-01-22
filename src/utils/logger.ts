@@ -1,5 +1,13 @@
 import { join } from "path";
-import { existsSync, appendFileSync, mkdirSync, readFileSync, writeFileSync, createWriteStream, WriteStream } from "fs";
+import {
+  existsSync,
+  appendFileSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  createWriteStream,
+  WriteStream,
+} from "fs";
 import { environment } from "@raycast/api";
 import { getRunId } from "./claude";
 
@@ -20,11 +28,11 @@ export { LOG_DIR, RUNS_DIR, INDEX_FILE, ERROR_LOG, JSONL_LOG };
  */
 export function formatLocalTime(date: Date): string {
   const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const seconds = String(date.getSeconds()).padStart(2, "0");
 
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
@@ -66,7 +74,7 @@ export function writeJsonLog(
   event: string,
   status: string,
   runId: string,
-  extraData: Record<string, any> = {}
+  extraData: Record<string, any> = {},
 ): void {
   ensureLogDirs();
 
@@ -101,14 +109,16 @@ export function writeRunLog(
   output: string,
   exitCode: number,
   duration: number,
-  startTimeMs?: number // 新增参数：开始时间戳（毫秒）
+  startTimeMs?: number, // 新增参数：开始时间戳（毫秒）
 ): void {
   ensureLogDirs();
 
   const runLogPath = join(RUNS_DIR, `${runId}.log`);
 
   // 使用传入的开始时间，如果没有则用当前时间减去时长
-  const startTime = startTimeMs ? new Date(startTimeMs) : new Date(Date.now() - duration);
+  const startTime = startTimeMs
+    ? new Date(startTimeMs)
+    : new Date(Date.now() - duration);
   const endTime = new Date(); // 当前时间作为结束时间
 
   const logContent = `
@@ -140,7 +150,7 @@ export function writeErrorLog(
   targetPath: string,
   workDir: string,
   errorMessage: string,
-  exitCode: number
+  exitCode: number,
 ): void {
   ensureLogDirs();
 
@@ -164,7 +174,12 @@ ${errorMessage}
   appendFileSync(ERROR_LOG, errorContent);
 }
 
-export function updateIndex(runId: string, targetPath: string, status: string, duration: number): void {
+export function updateIndex(
+  runId: string,
+  targetPath: string,
+  status: string,
+  duration: number,
+): void {
   ensureLogDirs();
 
   const timestamp = new Date().toLocaleString("zh-CN");
@@ -172,7 +187,9 @@ export function updateIndex(runId: string, targetPath: string, status: string, d
   const entry = `[${timestamp}] [${status}] ${runId} - ${basename} (${Math.round(duration / 1000)}s)\n  → ${join(RUNS_DIR, runId)}.log\n`;
 
   // 将新条目添加到索引文件的开头
-  const currentContent = existsSync(INDEX_FILE) ? readFileSync(INDEX_FILE, "utf-8") : "";
+  const currentContent = existsSync(INDEX_FILE)
+    ? readFileSync(INDEX_FILE, "utf-8")
+    : "";
   writeFileSync(INDEX_FILE, entry + currentContent);
 }
 
@@ -185,8 +202,8 @@ export class RunLogger {
   private logStream: WriteStream | null = null;
   private runLogPath: string;
   private pid: number | undefined;
-  private headerWritten: boolean = false;  // 跟踪头部是否已写入
-  private realtimeOutput: string = "";  // 存储实时输出内容
+  private headerWritten: boolean = false; // 跟踪头部是否已写入
+  private realtimeOutput: string = ""; // 存储实时输出内容
 
   constructor(targetPath: string, workDir: string) {
     this.runId = getRunId();
@@ -238,7 +255,7 @@ Agent Executor Raycast Extension - 运行日志
 ========================================
 Run ID: ${this.runId}
 开始时间: ${formatLocalTime(new Date(this.startTime))}
-${this.pid ? `进程 PID: ${this.pid}` : '进程 PID: 启动中...'}
+${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
 目标路径: ${this.targetPath}
 工作目录: ${this.workDir}
 ----------------------------------------
@@ -344,7 +361,13 @@ ${this.pid ? `进程 PID: ${this.pid}` : '进程 PID: 启动中...'}
         output: finalOutput.substring(0, 10000), // 限制输出长度，避免JSONL文件过大
         reason: "execution_error",
       });
-      writeErrorLog(this.runId, this.targetPath, this.workDir, finalOutput, exitCode);
+      writeErrorLog(
+        this.runId,
+        this.targetPath,
+        this.workDir,
+        finalOutput,
+        exitCode,
+      );
       updateIndex(this.runId, this.targetPath, "FAILED", duration);
     }
   }

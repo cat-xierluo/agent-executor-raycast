@@ -69,7 +69,9 @@ export function writeCommandMetadata(metadata: MetadataStore): void {
 /**
  * 获取单个命令的元数据
  */
-export function getCommandMetadata(commandName: string): CommandMetadata | undefined {
+export function getCommandMetadata(
+  commandName: string,
+): CommandMetadata | undefined {
   const metadata = readCommandMetadata();
   return metadata[commandName];
 }
@@ -77,7 +79,10 @@ export function getCommandMetadata(commandName: string): CommandMetadata | undef
 /**
  * 更新命令的元数据
  */
-export function updateCommandMetadata(commandName: string, updates: Partial<CommandMetadata>): void {
+export function updateCommandMetadata(
+  commandName: string,
+  updates: Partial<CommandMetadata>,
+): void {
   const metadata = readCommandMetadata();
   metadata[commandName] = {
     ...metadata[commandName],

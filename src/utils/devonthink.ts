@@ -3,9 +3,9 @@ import { showToast, Toast } from "@raycast/api";
 
 // 支持的 DevonThink 版本
 const DEVONTHINK_BUNDLE_IDS = [
-  "com.devon-technologies.think3",     // DevonThink 3
-  "com.devon-technologies.thinkpro2",  // DevonThink Pro 2
-  "com.devon-technologies.think2",     // DevonThink 2
+  "com.devon-technologies.think3", // DevonThink 3
+  "com.devon-technologies.thinkpro2", // DevonThink Pro 2
+  "com.devon-technologies.think2", // DevonThink 2
 ];
 
 // 获取当前运行的 DevonThink 的 bundle ID
@@ -36,7 +36,9 @@ export interface DevonThinkRecord {
  * 获取 DevonThink 中当前选中的记录（改进版）
  * 支持多种路径获取方式，包括 x-devonthink-item:// URL
  */
-export async function getSelectedDevonThinkRecords(): Promise<DevonThinkRecord[]> {
+export async function getSelectedDevonThinkRecords(): Promise<
+  DevonThinkRecord[]
+> {
   // 获取当前运行的 DevonThink 的 bundle ID
   let bundleId: string;
   try {
@@ -107,9 +109,12 @@ export async function getSelectedDevonThinkRecords(): Promise<DevonThinkRecord[]
   `;
 
   try {
-    const result = execSync(`osascript -e '${appleScript.replace(/'/g, "\\'")}'`, {
-      encoding: "utf-8",
-    }).trim();
+    const result = execSync(
+      `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
+      {
+        encoding: "utf-8",
+      },
+    ).trim();
 
     // 检查是否有错误
     if (result.startsWith("Error:")) {
@@ -121,12 +126,15 @@ export async function getSelectedDevonThinkRecords(): Promise<DevonThinkRecord[]
     }
 
     // 解析结果
-    const records: DevonThinkRecord[] = result.split(", ")
+    const records: DevonThinkRecord[] = result
+      .split(", ")
       .map((item) => {
-        const [path, name, uuid, type, referenceUrl, hasPath] = item.split("||");
+        const [path, name, uuid, type, referenceUrl, hasPath] =
+          item.split("||");
 
         // 如果没有文件系统路径，使用 reference URL
-        const finalPath = (path && hasPath === "true") ? path : (referenceUrl || "");
+        const finalPath =
+          path && hasPath === "true" ? path : referenceUrl || "";
 
         return {
           path: finalPath,
@@ -134,7 +142,7 @@ export async function getSelectedDevonThinkRecords(): Promise<DevonThinkRecord[]
           uuid,
           type: type === "group" ? "directory" : "file",
           referenceUrl: referenceUrl || undefined,
-          hasFileSystemPath: hasPath === "true"
+          hasFileSystemPath: hasPath === "true",
         };
       })
       // 过滤掉没有有效路径的记录
@@ -143,7 +151,10 @@ export async function getSelectedDevonThinkRecords(): Promise<DevonThinkRecord[]
     return records;
   } catch (error) {
     // DEVONthink 未运行或未安装
-    if (error instanceof Error && error.message.includes("com.devon-technologies.thinkpro2")) {
+    if (
+      error instanceof Error &&
+      error.message.includes("com.devon-technologies.thinkpro2")
+    ) {
       throw new Error("DEVONthink 未运行，请先启动 DEVONthink");
     }
     throw error;
@@ -175,9 +186,12 @@ export async function getFrontmostApplication(): Promise<string> {
       end tell
     `;
 
-    const result = execSync(`osascript -e '${appleScript.replace(/'/g, "\\'")}'`, {
-      encoding: "utf-8",
-    }).trim();
+    const result = execSync(
+      `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
+      {
+        encoding: "utf-8",
+      },
+    ).trim();
 
     return result;
   } catch (error) {
@@ -216,7 +230,9 @@ export function isFilesNoIndexPath(path: string): boolean {
  * 将 x-devonthink-item:// URL 导出为临时文件
  * 用于处理没有文件系统路径的数据库记录
  */
-export async function exportDevonThinkRecordToTemp(record: DevonThinkRecord): Promise<string> {
+export async function exportDevonThinkRecordToTemp(
+  record: DevonThinkRecord,
+): Promise<string> {
   if (!record.referenceUrl) {
     throw new Error("该记录没有 reference URL");
   }
@@ -248,9 +264,12 @@ export async function exportDevonThinkRecordToTemp(record: DevonThinkRecord): Pr
     // 确保临时目录存在
     execSync(`mkdir -p "${tempDir}"`, { encoding: "utf-8" });
 
-    const result = execSync(`osascript -e '${appleScript.replace(/'/g, "\\'")}'`, {
-      encoding: "utf-8",
-    }).trim();
+    const result = execSync(
+      `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
+      {
+        encoding: "utf-8",
+      },
+    ).trim();
 
     if (result.startsWith("Error:")) {
       throw new Error(result.replace("Error: ", ""));
@@ -270,7 +289,7 @@ export async function exportDevonThinkRecordToTemp(record: DevonThinkRecord): Pr
  * 如果是 x-devonthink-item:// URL 或 Files.noindex 路径，先导出到临时文件
  */
 export async function prepareFilePathForCommand(
-  record: DevonThinkRecord
+  record: DevonThinkRecord,
 ): Promise<{ path: string; isTemp: boolean; originalPath: string }> {
   // 如果是 x-devonthink-item:// URL，需要导出
   if (isDevonThinkURL(record.path)) {

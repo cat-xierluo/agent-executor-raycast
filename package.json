@@ -30,7 +30,7 @@
       "type": "directory",
       "required": true,
       "title": "项目目录",
-      "description": "包含 .claude/commands/ 的项目目录（必填）"
+      "description": "Agent Executor 插件根目录（必填）"
     },
     {
       "name": "projectDir2",

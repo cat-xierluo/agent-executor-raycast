@@ -10,7 +10,13 @@ import {
   confirmAlert,
 } from "@raycast/api";
 import { useState, useEffect } from "react";
-import { getGlobalSummary, getAllCommandStats, clearAllStats, clearCommandStats, CommandStats } from "../utils/stats";
+import {
+  getGlobalSummary,
+  getAllCommandStats,
+  clearAllStats,
+  clearCommandStats,
+  CommandStats,
+} from "../utils/stats";
 import { clearAllHistory } from "../utils/status";
 
 /**
@@ -51,7 +57,8 @@ export function GlobalStatsItem() {
   async function handleClearAllHistory() {
     const confirmed = await confirmAlert({
       title: "清空所有历史记录",
-      message: "确定要清空所有历史记录吗？\n\n这将删除所有已完成和失败的任务日志，但会保留正在运行的任务。此操作不可撤销。",
+      message:
+        "确定要清空所有历史记录吗？\n\n这将删除所有已完成和失败的任务日志，但会保留正在运行的任务。此操作不可撤销。",
       primaryAction: {
         title: "清空",
         style: Action.Style.Destructive,
@@ -190,7 +197,11 @@ export function CommandStatsList() {
   }
 
   return (
-    <List isLoading={isLoading} navigationTitle="命令统计" searchBarPlaceholder="搜索命令...">
+    <List
+      isLoading={isLoading}
+      navigationTitle="命令统计"
+      searchBarPlaceholder="搜索命令..."
+    >
       <List.Section title={`命令统计 (${stats.length})`}>
         {stats.map((stat) => (
           <ListItem

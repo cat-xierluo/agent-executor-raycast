@@ -14,14 +14,17 @@ export interface ClaudeCommand {
   icon: Icon;
   pinned?: boolean;
   isNew?: boolean;
-  projectName?: string;  // 新增：命令来自哪个项目
-  projectDir?: string;   // 新增：项目的根目录
+  projectName?: string; // 新增：命令来自哪个项目
+  projectDir?: string; // 新增：项目的根目录
 }
 
 /**
  * 解析 @include 指令,支持相对路径和绝对路径(~/)
  */
-function resolveIncludePath(includePath: string, currentFilePath: string): string {
+function resolveIncludePath(
+  includePath: string,
+  currentFilePath: string,
+): string {
   // 处理 ~/ 开头的路径
   if (includePath.startsWith("~/")) {
     return join(homedir(), includePath.slice(2));
@@ -56,7 +59,10 @@ function resolveIncludePath(includePath: string, currentFilePath: string): strin
  *
  * 新行为: @include 指令会替换为被引用文件的内容,并保留原文件中 @include 之后的内容
  */
-function readFileWithIncludes(filePath: string, visited = new Set<string>()): string {
+function readFileWithIncludes(
+  filePath: string,
+  visited = new Set<string>(),
+): string {
   // 防止循环引用
   if (visited.has(filePath)) {
     console.warn(`Circular include detected: ${filePath}`);
@@ -118,7 +124,12 @@ function readFileWithIncludes(filePath: string, visited = new Set<string>()): st
   }
 
   // 合并内容: @include 之前 + 被引用内容 + @include 之后
-  return beforeInclude + "\n" + includedContent + (afterInclude ? "\n" + afterInclude : "");
+  return (
+    beforeInclude +
+    "\n" +
+    includedContent +
+    (afterInclude ? "\n" + afterInclude : "")
+  );
 }
 
 /**
@@ -168,8 +179,8 @@ function scanSingleProject(autoweaveDir: string): ClaudeCommand[] {
       icon,
       pinned: false,
       isNew: false,
-      projectName,  // 添加项目名称
-      projectDir: autoweaveDir,  // 添加项目目录
+      projectName, // 添加项目名称
+      projectDir: autoweaveDir, // 添加项目目录
     });
   }
 
@@ -213,7 +224,10 @@ export function scanCommands(autoweaveDirs: string[]): ClaudeCommand[] {
  * 标题: 使用文件名(不使用 frontmatter 的 name 字段)
  * 描述: 优先使用 frontmatter 的 description 字段
  */
-function extractCommandInfo(name: string, content: string): {
+function extractCommandInfo(
+  name: string,
+  content: string,
+): {
   title: string;
   description: string;
 } {
@@ -264,14 +278,15 @@ function extractCommandInfo(name: string, content: string): {
     }
 
     // 如果没有 frontmatter 的 description,尝试从内容中提取
-    if (description === "" && (
-      line.includes("功能") ||
-      line.includes("描述") ||
-      line.includes("说明") ||
-      line.startsWith(">") ||
-      line.startsWith("**") ||
-      line.startsWith("* ")
-    )) {
+    if (
+      description === "" &&
+      (line.includes("功能") ||
+        line.includes("描述") ||
+        line.includes("说明") ||
+        line.startsWith(">") ||
+        line.startsWith("**") ||
+        line.startsWith("* "))
+    ) {
       // 清理格式
       description = line
         .replace(/^>\s*/, "")
@@ -299,138 +314,138 @@ function extractCommandInfo(name: string, content: string): {
 function getCommandIcon(name: string): Icon {
   // 扩展的图标列表，提供更多选择
   const icons: Icon[] = [
-    Icon.MagnifyingGlass,    // 搜索
-    Icon.ArrowClockwise,     // 同步/刷新
-    Icon.Globe,              // 路由/网络
-    Icon.Document,           // 文档/预处理
-    Icon.Text,               // 文本/方案
-    Icon.List,               // 列表/分析
-    Icon.QuestionMark,       // 帮助
-    Icon.Book,               // 书籍/法律
-    Icon.Folder,             // 文件/文件夹
-    Icon.Terminal,           // 终端/代码
-    Icon.Gear,               // 设置/工具
-    Icon.Wand,               // 魔杖/自动化
-    Icon.AppWindow,          // 窗口
-    Icon.Bolt,               // 闪电/快速
-    Icon.Calculator,         // 计算
-    Icon.ChartBar,           // 图表
-    Icon.Cog,                // 齿轮
-    Icon.Code,               // 代码
-    Icon.ComputerChip,       // 芯片
-    Icon.CreditCard,         // 卡片
-    Icon.Cursor,             // 光标
-    Icon.Dashboard,          // 仪表板
-    Icon.Database,           // 数据库
-    Icon.Doc,                // 文档
-    Icon.Download,           // 下载
-    Icon.Envelope,           // 邮件
-    Icon.Eye,                // 眼睛/查看
-    Icon.Finder,             // Finder
-    Icon.Flashlight,         // 手电筒
-    Icon.Funnel,             // 过滤
-    Icon.Gift,               // 礼物
-    Icon.Globe,              // 地球
-    Icon.Hammer,             // 锤子
-    Icon.Hashtag,            // 标签
-    Icon.Heart,              // 心形
-    Icon.Image,              // 图片
-    Icon.Info,               // 信息
-    Icon.Key,                // 钥匙
-    Icon.Link,               // 链接
-    Icon.LifeBuoy,           // 救生圈
-    Icon.LightBulb,          // 灯泡
-    Icon.List,               // 列表
-    Icon.Location,           // 位置
-    Icon.Lock,               // 锁
-    Icon.Map,                // 地图
-    Icon.Megaphone,          // 扩音器
-    Icon.MemoryChip,         // 内存
-    Icon.Microphone,         // 麦克风
-    Icon.Mobile,             // 手机
-    Icon.Mouse,              // 鼠标
-    Icon.Music,              // 音乐
-    Icon.Newspaper,          // 报纸
-    Icon.Note,               // 笔记
-    Icon.Paper,              // 纸张
-    Icon.Pencil,             // 铅笔
-    Icon.Phone,              // 电话
-    Icon.Play,               // 播放
-    Icon.Plus,               // 加号
-    Icon.Print,              // 打印
-    Icon.Puzzle,             // 拼图
-    Icon.QuestionMark,       // 问号
-    Icon.Rocket,             // 火箭
-    Icon.Scalpel,            // 手术刀
-    Icon.Scissors,           // 剪刀
-    Icon.Search,             // 搜索
-    Icon.Share,              // 分享
-    Icon.Shield,             // 盾牌
-    Icon.Star,               // 星星
-    Icon.Syringe,            // 注射器
-    Icon.Tag,                // 标签
-    Icon.Tangent,            // 切线
-    Icon.Text,               // 文本
-    Icon.TrafficLight,       // 红绿灯
-    Icon.TwoColumns,         // 双列
-    Icon.Video,              // 视频
-    Icon.Wallet,             // 钱包
-    Icon.WandAndStars,       // 魔杖和星星
-    Icon.Wrench,             // 扳手
+    Icon.MagnifyingGlass, // 搜索
+    Icon.ArrowClockwise, // 同步/刷新
+    Icon.Globe, // 路由/网络
+    Icon.Document, // 文档/预处理
+    Icon.Text, // 文本/方案
+    Icon.List, // 列表/分析
+    Icon.QuestionMark, // 帮助
+    Icon.Book, // 书籍/法律
+    Icon.Folder, // 文件/文件夹
+    Icon.Terminal, // 终端/代码
+    Icon.Gear, // 设置/工具
+    Icon.Wand, // 魔杖/自动化
+    Icon.AppWindow, // 窗口
+    Icon.Bolt, // 闪电/快速
+    Icon.Calculator, // 计算
+    Icon.ChartBar, // 图表
+    Icon.Cog, // 齿轮
+    Icon.Code, // 代码
+    Icon.ComputerChip, // 芯片
+    Icon.CreditCard, // 卡片
+    Icon.Cursor, // 光标
+    Icon.Dashboard, // 仪表板
+    Icon.Database, // 数据库
+    Icon.Doc, // 文档
+    Icon.Download, // 下载
+    Icon.Envelope, // 邮件
+    Icon.Eye, // 眼睛/查看
+    Icon.Finder, // Finder
+    Icon.Flashlight, // 手电筒
+    Icon.Funnel, // 过滤
+    Icon.Gift, // 礼物
+    Icon.Globe, // 地球
+    Icon.Hammer, // 锤子
+    Icon.Hashtag, // 标签
+    Icon.Heart, // 心形
+    Icon.Image, // 图片
+    Icon.Info, // 信息
+    Icon.Key, // 钥匙
+    Icon.Link, // 链接
+    Icon.LifeBuoy, // 救生圈
+    Icon.LightBulb, // 灯泡
+    Icon.List, // 列表
+    Icon.Location, // 位置
+    Icon.Lock, // 锁
+    Icon.Map, // 地图
+    Icon.Megaphone, // 扩音器
+    Icon.MemoryChip, // 内存
+    Icon.Microphone, // 麦克风
+    Icon.Mobile, // 手机
+    Icon.Mouse, // 鼠标
+    Icon.Music, // 音乐
+    Icon.Newspaper, // 报纸
+    Icon.Note, // 笔记
+    Icon.Paper, // 纸张
+    Icon.Pencil, // 铅笔
+    Icon.Phone, // 电话
+    Icon.Play, // 播放
+    Icon.Plus, // 加号
+    Icon.Print, // 打印
+    Icon.Puzzle, // 拼图
+    Icon.QuestionMark, // 问号
+    Icon.Rocket, // 火箭
+    Icon.Scalpel, // 手术刀
+    Icon.Scissors, // 剪刀
+    Icon.Search, // 搜索
+    Icon.Share, // 分享
+    Icon.Shield, // 盾牌
+    Icon.Star, // 星星
+    Icon.Syringe, // 注射器
+    Icon.Tag, // 标签
+    Icon.Tangent, // 切线
+    Icon.Text, // 文本
+    Icon.TrafficLight, // 红绿灯
+    Icon.TwoColumns, // 双列
+    Icon.Video, // 视频
+    Icon.Wallet, // 钱包
+    Icon.WandAndStars, // 魔杖和星星
+    Icon.Wrench, // 扳手
   ];
 
   // 关键词精确匹配（优先级最高）
   const keywordMap: Record<string, Icon> = {
-    'search': Icon.MagnifyingGlass,
-    'find': Icon.MagnifyingGlass,
-    'research': Icon.MagnifyingGlass,
-    'sync': Icon.ArrowClockwise,
-    'update': Icon.ArrowClockwise,
-    'refresh': Icon.ArrowClockwise,
-    'router': Icon.Globe,
-    'route': Icon.Globe,
-    'navigate': Icon.Globe,
-    'preprocess': Icon.Document,
-    'convert': Icon.Document,
-    'transform': Icon.Document,
-    'document': Icon.Document,
-    'proposal': Icon.Text,
-    'plan': Icon.Text,
-    'suggest': Icon.Text,
-    'analyze': Icon.List,
-    'check': Icon.CheckCircle,
-    'review': Icon.List,
-    'help': Icon.QuestionMark,
-    'info': Icon.Info,
-    'guide': Icon.Map,
-    'legal': Icon.Book,
-    'book': Icon.Book,
-    'library': Icon.Book,
-    'file': Icon.Doc,
-    'folder': Icon.Folder,
-    'code': Icon.Code,
-    'terminal': Icon.Terminal,
-    'command': Icon.Terminal,
-    'auto': Icon.Wand,
-    'ai': Icon.MemoryChip,
-    'bot': Icon.Robot,
-    'test': Icon.Flask,
-    'fix': Icon.Wrench,
-    'build': Icon.Hammer,
-    'deploy': Icon.Rocket,
-    'download': Icon.Download,
-    'upload': Icon.Upload,
-    'email': Icon.Envelope,
-    'mail': Icon.Envelope,
-    'web': Icon.Globe,
-    'api': Icon.Cloud,
-    'data': Icon.Database,
-    'config': Icon.Gear,
-    'setting': Icon.Gear,
-    'tool': Icon.Wrench,
-    'script': Icon.Code,
-    'batch': Icon.Grid,
-    'multi': Icon.TwoColumns,
+    search: Icon.MagnifyingGlass,
+    find: Icon.MagnifyingGlass,
+    research: Icon.MagnifyingGlass,
+    sync: Icon.ArrowClockwise,
+    update: Icon.ArrowClockwise,
+    refresh: Icon.ArrowClockwise,
+    router: Icon.Globe,
+    route: Icon.Globe,
+    navigate: Icon.Globe,
+    preprocess: Icon.Document,
+    convert: Icon.Document,
+    transform: Icon.Document,
+    document: Icon.Document,
+    proposal: Icon.Text,
+    plan: Icon.Text,
+    suggest: Icon.Text,
+    analyze: Icon.List,
+    check: Icon.CheckCircle,
+    review: Icon.List,
+    help: Icon.QuestionMark,
+    info: Icon.Info,
+    guide: Icon.Map,
+    legal: Icon.Book,
+    book: Icon.Book,
+    library: Icon.Book,
+    file: Icon.Doc,
+    folder: Icon.Folder,
+    code: Icon.Code,
+    terminal: Icon.Terminal,
+    command: Icon.Terminal,
+    auto: Icon.Wand,
+    ai: Icon.MemoryChip,
+    bot: Icon.Robot,
+    test: Icon.Flask,
+    fix: Icon.Wrench,
+    build: Icon.Hammer,
+    deploy: Icon.Rocket,
+    download: Icon.Download,
+    upload: Icon.Upload,
+    email: Icon.Envelope,
+    mail: Icon.Envelope,
+    web: Icon.Globe,
+    api: Icon.Cloud,
+    data: Icon.Database,
+    config: Icon.Gear,
+    setting: Icon.Gear,
+    tool: Icon.Wrench,
+    script: Icon.Code,
+    batch: Icon.Grid,
+    multi: Icon.TwoColumns,
   };
 
   // 转为小写进行匹配

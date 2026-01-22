@@ -10,7 +10,12 @@ import {
   confirmAlert,
 } from "@raycast/api";
 import { useState, useEffect } from "react";
-import { getAllRunStatus, RunInfo, countRunningCommands, clearAllHistory } from "./utils/status";
+import {
+  getAllRunStatus,
+  RunInfo,
+  countRunningCommands,
+  clearAllHistory,
+} from "./utils/status";
 import { readFileSync, existsSync, appendFileSync } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
@@ -27,7 +32,7 @@ function isProcessAlive(pid: number): boolean {
     return true;
   } catch (error) {
     const errno = (error as any).errno;
-    if (errno === 'ESRCH' || errno === 'EPERM') {
+    if (errno === "ESRCH" || errno === "EPERM") {
       return false;
     }
     return false;
@@ -86,7 +91,10 @@ export default function StatusList() {
     } else if (diffHours < 24) {
       return `${diffHours} 小时前`;
     } else if (diffDays === 1) {
-      return "昨天 " + date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+      return (
+        "昨天 " +
+        date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+      );
     } else {
       return date.toLocaleString("zh-CN", {
         month: "numeric",
@@ -140,9 +148,13 @@ export default function StatusList() {
     // 构建辅助信息
     const accessories = [
       { text: formatDateTime(run.endTime || run.startTime), icon: Icon.Clock },
-      run.duration ? { text: formatDuration(run.duration), icon: Icon.Hourglass } : null,
+      run.duration
+        ? { text: formatDuration(run.duration), icon: Icon.Hourglass }
+        : null,
       { text: statusText, icon: statusIcon },
-      run.status === "failed" && run.exitCode !== undefined ? { text: `退出码: ${run.exitCode}`, icon: Icon.Text } : null,
+      run.status === "failed" && run.exitCode !== undefined
+        ? { text: `退出码: ${run.exitCode}`, icon: Icon.Text }
+        : null,
     ].filter(Boolean);
 
     return (
@@ -191,7 +203,8 @@ export default function StatusList() {
                         await showToast({
                           style: Toast.Style.Failure,
                           title: "终止失败",
-                          message: error instanceof Error ? error.message : "未知错误",
+                          message:
+                            error instanceof Error ? error.message : "未知错误",
                         });
                       }
                     }}
@@ -222,10 +235,15 @@ export default function StatusList() {
                         run_id: run.runId,
                         status: "failed",
                         exit_code: -1,
-                        duration: Math.floor((Date.now() - run.startTime.getTime()) / 1000),
+                        duration: Math.floor(
+                          (Date.now() - run.startTime.getTime()) / 1000,
+                        ),
                         reason: "user_force_closed",
                       };
-                      appendFileSync(JSONL_LOG, JSON.stringify(failedEvent) + "\n");
+                      appendFileSync(
+                        JSONL_LOG,
+                        JSON.stringify(failedEvent) + "\n",
+                      );
 
                       await showToast({
                         style: Toast.Style.Success,
@@ -237,7 +255,8 @@ export default function StatusList() {
                       await showToast({
                         style: Toast.Style.Failure,
                         title: "标记失败",
-                        message: error instanceof Error ? error.message : "未知错误",
+                        message:
+                          error instanceof Error ? error.message : "未知错误",
                       });
                     }
                   }}
@@ -266,8 +285,9 @@ export default function StatusList() {
   }
 
   // 合并所有运行记录并按时间倒序排序（最新的在前）
-  const allRuns = [...runs.running, ...runs.completed, ...runs.failed]
-    .sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
+  const allRuns = [...runs.running, ...runs.completed, ...runs.failed].sort(
+    (a, b) => b.startTime.getTime() - a.startTime.getTime(),
+  );
 
   const totalItems = allRuns.length;
 
@@ -359,7 +379,7 @@ export function LogDetail({ run }: LogDetailProps) {
   const [logContent, setLogContent] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [isActuallyRunning, setIsActuallyRunning] = useState<boolean>(
-    run.status === "running" && (run.pid ? isProcessAlive(run.pid) : true)
+    run.status === "running" && (run.pid ? isProcessAlive(run.pid) : true),
   );
 
   useEffect(() => {
@@ -420,7 +440,9 @@ export function LogDetail({ run }: LogDetailProps) {
       // 提取信息
       const startedEntry = runEntries.find((e) => e.event === "started");
       const executingEntry = runEntries.find((e) => e.event === "executing");
-      const completedEntry = runEntries.find((e) => e.event === "completed" || e.event === "failed");
+      const completedEntry = runEntries.find(
+        (e) => e.event === "completed" || e.event === "failed",
+      );
 
       // 构建日志内容
       let logLines: string[] = [];
@@ -475,9 +497,10 @@ export function LogDetail({ run }: LogDetailProps) {
         logLines.push(`结束时间: ${completedEntry.ts}`);
       }
       if (completedEntry?.duration !== undefined) {
-        const duration = typeof completedEntry.duration === 'number'
-          ? completedEntry.duration
-          : parseFloat(completedEntry.duration);
+        const duration =
+          typeof completedEntry.duration === "number"
+            ? completedEntry.duration
+            : parseFloat(completedEntry.duration);
         if (!isNaN(duration)) {
           logLines.push(`执行时长: ${duration.toFixed(1)}秒`);
         }
@@ -601,10 +624,10 @@ export function LogDetail({ run }: LogDetailProps) {
     }
 
     // 昨天或更早：显示完整日期时间
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
 
     if (diffDays === 1) {
       return `昨天 ${hours}:${minutes}`;
@@ -620,9 +643,14 @@ export function LogDetail({ run }: LogDetailProps) {
   };
 
   // 状态文本和图标
-  const statusText = run.status === "running"
-    ? (isActuallyRunning ? "🟢 运行中" : "⚠️ 进程已结束")
-    : run.status === "completed" ? "✅ 成功" : "❌ 失败";
+  const statusText =
+    run.status === "running"
+      ? isActuallyRunning
+        ? "🟢 运行中"
+        : "⚠️ 进程已结束"
+      : run.status === "completed"
+        ? "✅ 成功"
+        : "❌ 失败";
   const durationText = run.duration ? formatDuration(run.duration) : "进行中";
 
   return (
@@ -639,8 +667,16 @@ export function LogDetail({ run }: LogDetailProps) {
           <Detail.Metadata.Separator />
 
           <Detail.Metadata.TagList title="时间">
-            <Detail.Metadata.TagList.Item text={`开始: ${formatTime(run.startTime)}`} color="#a0a0a0" />
-            {run.endTime && <Detail.Metadata.TagList.Item text={`结束: ${formatTime(run.endTime)}`} color="#a0a0a0" />}
+            <Detail.Metadata.TagList.Item
+              text={`开始: ${formatTime(run.startTime)}`}
+              color="#a0a0a0"
+            />
+            {run.endTime && (
+              <Detail.Metadata.TagList.Item
+                text={`结束: ${formatTime(run.endTime)}`}
+                color="#a0a0a0"
+              />
+            )}
           </Detail.Metadata.TagList>
 
           <Detail.Metadata.Separator />
@@ -648,12 +684,21 @@ export function LogDetail({ run }: LogDetailProps) {
           <Detail.Metadata.TagList title="进程信息">
             {run.pid ? (
               <>
-                <Detail.Metadata.TagList.Item text={`PID: ${run.pid}`} color="#50C878" />
+                <Detail.Metadata.TagList.Item
+                  text={`PID: ${run.pid}`}
+                  color="#50C878"
+                />
                 {isActuallyRunning && (
-                  <Detail.Metadata.TagList.Item text="✓ 进程运行中" color="#50C878" />
+                  <Detail.Metadata.TagList.Item
+                    text="✓ 进程运行中"
+                    color="#50C878"
+                  />
                 )}
                 {run.status === "running" && !isActuallyRunning && (
-                  <Detail.Metadata.TagList.Item text="✗ 进程已结束" color="#ff6b6b" />
+                  <Detail.Metadata.TagList.Item
+                    text="✗ 进程已结束"
+                    color="#ff6b6b"
+                  />
                 )}
               </>
             ) : (
@@ -661,7 +706,13 @@ export function LogDetail({ run }: LogDetailProps) {
             )}
             <Detail.Metadata.TagList.Item
               text={`退出码: ${run.status === "failed" ? run.exitCode : run.status === "completed" ? "0" : "-"}`}
-              color={run.status === "failed" ? "#ff6b6b" : run.status === "completed" ? "#50C878" : "#a0a0a0"}
+              color={
+                run.status === "failed"
+                  ? "#ff6b6b"
+                  : run.status === "completed"
+                    ? "#50C878"
+                    : "#a0a0a0"
+              }
             />
           </Detail.Metadata.TagList>
 
@@ -677,18 +728,29 @@ export function LogDetail({ run }: LogDetailProps) {
           <Detail.Metadata.Separator />
 
           <Detail.Metadata.Label title="Run ID" text={run.runId} />
-          <Detail.Metadata.Label title="日志大小" text={`${logStats.totalLines} 行 / ${(logStats.totalChars / 1024).toFixed(2)} KB`} />
+          <Detail.Metadata.Label
+            title="日志大小"
+            text={`${logStats.totalLines} 行 / ${(logStats.totalChars / 1024).toFixed(2)} KB`}
+          />
 
           {run.status === "running" && isActuallyRunning && (
             <>
               <Detail.Metadata.Separator />
-              <Detail.Metadata.Label title="🔄 自动刷新" text="每 2 秒" icon={Icon.ArrowClockwise} />
+              <Detail.Metadata.Label
+                title="🔄 自动刷新"
+                text="每 2 秒"
+                icon={Icon.ArrowClockwise}
+              />
             </>
           )}
           {run.status === "running" && !isActuallyRunning && (
             <>
               <Detail.Metadata.Separator />
-              <Detail.Metadata.Label title="⚠️ 进程状态" text="进程已异常退出" icon={Icon.ExclamationMark} />
+              <Detail.Metadata.Label
+                title="⚠️ 进程状态"
+                text="进程已异常退出"
+                icon={Icon.ExclamationMark}
+              />
             </>
           )}
         </Detail.Metadata>

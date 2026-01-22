@@ -1,4 +1,11 @@
-import { readFileSync, existsSync, writeFileSync, readdirSync, unlinkSync, statSync } from "fs";
+import {
+  readFileSync,
+  existsSync,
+  writeFileSync,
+  readdirSync,
+  unlinkSync,
+  statSync,
+} from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
 import { LogEntry, JSONL_LOG, RUNS_DIR, INDEX_FILE, ERROR_LOG } from "./logger";
@@ -16,13 +23,15 @@ function isProcessAlive(pid: number): boolean {
 
     // 进程存在，但需要检查是否是僵尸进程
     // 通过 execSync 调用 ps 命令来检查进程状态
-    const { execSync } = require('child_process');
+    const { execSync } = require("child_process");
     try {
-      const psOutput = execSync(`ps -p ${pid} -o state=`, { encoding: 'utf-8' });
+      const psOutput = execSync(`ps -p ${pid} -o state=`, {
+        encoding: "utf-8",
+      });
       const state = psOutput.trim();
 
       // 如果进程状态是 Z (Zombie)，说明进程已经结束但等待父进程回收
-      if (state === 'Z') {
+      if (state === "Z") {
         return false;
       }
 
@@ -34,7 +43,7 @@ function isProcessAlive(pid: number): boolean {
   } catch (error) {
     // 如果抛出错误（通常是 ESRCH - No such process），说明进程不存在
     const errno = (error as any).errno;
-    if (errno === 'ESRCH' || errno === 'EPERM') {
+    if (errno === "ESRCH" || errno === "EPERM") {
       return false;
     }
     // 其他错误也认为进程不可访问
@@ -49,20 +58,32 @@ function isProcessAlive(pid: number): boolean {
  * @param targetPath 目标路径
  * @returns 是否有输出内容
  */
-function checkProcessOutput(pid: number, runId: string, targetPath: string): boolean {
+function checkProcessOutput(
+  pid: number,
+  runId: string,
+  targetPath: string,
+): boolean {
   try {
     // 1. 检查JSONL日志中是否有输出内容
     const entries = readLogEntries();
-    const runEntries = entries.filter(entry => entry.runId === runId);
+    const runEntries = entries.filter((entry) => entry.runId === runId);
 
     // 检查是否有完成事件的输出
-    const completedEntry = runEntries.find(entry => entry.event === "completed" || entry.event === "failed");
-    if (completedEntry && completedEntry.output && completedEntry.output.length > 0) {
+    const completedEntry = runEntries.find(
+      (entry) => entry.event === "completed" || entry.event === "failed",
+    );
+    if (
+      completedEntry &&
+      completedEntry.output &&
+      completedEntry.output.length > 0
+    ) {
       return true;
     }
 
     // 检查是否有实时输出事件
-    const realtimeOutputs = runEntries.filter(entry => entry.event === "realtime_output");
+    const realtimeOutputs = runEntries.filter(
+      (entry) => entry.event === "realtime_output",
+    );
     if (realtimeOutputs.length > 0) {
       // 如果有实时输出,说明进程有活动
       return true;
@@ -72,7 +93,8 @@ function checkProcessOutput(pid: number, runId: string, targetPath: string): boo
     if (targetPath && targetPath !== "N/A" && targetPath !== "未知路径") {
       try {
         const targetStat = statSync(targetPath);
-        const hoursSinceModified = (Date.now() - targetStat.mtime.getTime()) / (1000 * 60 * 60);
+        const hoursSinceModified =
+          (Date.now() - targetStat.mtime.getTime()) / (1000 * 60 * 60);
         // 24小时内被修改过，认为有输出
         if (hoursSinceModified < 24) {
           return true;
@@ -84,13 +106,15 @@ function checkProcessOutput(pid: number, runId: string, targetPath: string): boo
 
     // 3. 检查进程的实际运行状态
     try {
-      const output = execSync(`ps -o pid,stat,etime -p ${pid}`, { encoding: 'utf8' });
-      const lines = output.trim().split('\n');
+      const output = execSync(`ps -o pid,stat,etime -p ${pid}`, {
+        encoding: "utf8",
+      });
+      const lines = output.trim().split("\n");
       if (lines.length >= 2) {
         const stats = lines[1].trim().split(/\s+/);
         const stat = stats[1];
         // 如果进程处于运行(R)或睡眠(S)状态，认为是活跃的
-        if (stat.includes('R') || stat.includes('S')) {
+        if (stat.includes("R") || stat.includes("S")) {
           return true;
         }
       }
@@ -112,8 +136,8 @@ function checkProcessOutput(pid: number, runId: string, targetPath: string): boo
 function checkProcessStuck(pid: number): boolean {
   try {
     // 检查进程运行时间
-    const output = execSync(`ps -o pid,etime -p ${pid}`, { encoding: 'utf8' });
-    const lines = output.trim().split('\n');
+    const output = execSync(`ps -o pid,etime -p ${pid}`, { encoding: "utf8" });
+    const lines = output.trim().split("\n");
     if (lines.length >= 2) {
       const etime = lines[1].trim().split(/\s+/)[1];
       // 如果运行时间超过30分钟且没有新输出，认为是卡住
@@ -132,13 +156,13 @@ function checkProcessStuck(pid: number): boolean {
  */
 function parseEtimeToHours(etime: string): number {
   // etime格式：[[dd-]hh:]mm:ss 或 hh:mm:ss
-  const parts = etime.split(':');
+  const parts = etime.split(":");
   if (parts.length === 3) {
     // 格式：hh:mm:ss
     return parseInt(parts[0]) + parseInt(parts[1]) / 60;
-  } else if (parts.length === 2 && etime.includes('-')) {
+  } else if (parts.length === 2 && etime.includes("-")) {
     // 格式：dd-hh:mm:ss
-    const [d, h, m] = etime.replace('-', ':').split(':');
+    const [d, h, m] = etime.replace("-", ":").split(":");
     return parseInt(d) * 24 + parseInt(h) + parseInt(m) / 60;
   }
   return 0;
@@ -151,11 +175,15 @@ function parseEtimeToHours(etime: string): number {
  * @param targetPath 目标路径
  * @returns 检测结果
  */
-function detectProcessStatus(pid: number, runId: string, targetPath: string): {
+function detectProcessStatus(
+  pid: number,
+  runId: string,
+  targetPath: string,
+): {
   isAlive: boolean;
   hasOutput: boolean;
   exitCode?: number;
-  status: 'running' | 'completed' | 'failed';
+  status: "running" | "completed" | "failed";
 } {
   try {
     // 1. 检测进程是否真实存活
@@ -166,21 +194,21 @@ function detectProcessStatus(pid: number, runId: string, targetPath: string): {
 
     // 3. 如果进程已结束但有输出，说明已完成
     if (!isAlive && hasOutput) {
-      return { isAlive: false, hasOutput: true, status: 'completed' };
+      return { isAlive: false, hasOutput: true, status: "completed" };
     }
 
     // 4. 如果进程存活，检查是否有异常（长时间无输出）
     if (isAlive) {
       const isStuck = checkProcessStuck(pid);
       if (isStuck) {
-        return { isAlive: true, hasOutput: false, status: 'failed' };
+        return { isAlive: true, hasOutput: false, status: "failed" };
       }
     }
 
-    return { isAlive, hasOutput, status: isAlive ? 'running' : 'failed' };
+    return { isAlive, hasOutput, status: isAlive ? "running" : "failed" };
   } catch (error) {
-    console.error('[detectProcessStatus] Error:', error);
-    return { isAlive: false, hasOutput: false, status: 'failed' };
+    console.error("[detectProcessStatus] Error:", error);
+    return { isAlive: false, hasOutput: false, status: "failed" };
   }
 }
 
@@ -291,8 +319,10 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
   }
 
   // 按时间戳排序
-  const sortedLogs = logs.sort((a, b) =>
-    parseLocalTime(a.timestamp).getTime() - parseLocalTime(b.timestamp).getTime()
+  const sortedLogs = logs.sort(
+    (a, b) =>
+      parseLocalTime(a.timestamp).getTime() -
+      parseLocalTime(b.timestamp).getTime(),
   );
 
   // 查找各个事件
@@ -313,8 +343,9 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
 
   // 检查 target 是否是真正的文件路径（包含 / 并且以 . 开头有扩展名，或者是绝对路径）
   // 如果不是，说明这是命令名而不是文件路径
-  const isFilePath = targetFullPath.includes("/") &&
-                     (targetFullPath.startsWith("/") || targetFullPath.startsWith("~"));
+  const isFilePath =
+    targetFullPath.includes("/") &&
+    (targetFullPath.startsWith("/") || targetFullPath.startsWith("~"));
 
   // 提取文件名和目录
   let fileName: string;
@@ -351,14 +382,16 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
     if (pid) {
       const processInfo = detectProcessStatus(pid, runId, directory);
 
-      if (processInfo.status === 'completed') {
+      if (processInfo.status === "completed") {
         status = "completed";
         endTime = new Date(); // 使用当前时间作为结束时间
         duration = (endTime.getTime() - startTime.getTime()) / 1000; // 转换为秒
-        console.log(`[extractRunInfo] 检测到PID ${pid} 已完成，基于输出内容判定状态`);
+        console.log(
+          `[extractRunInfo] 检测到PID ${pid} 已完成，基于输出内容判定状态`,
+        );
 
         // 写入completed事件到JSONL,避免下次再计算
-        const { writeJsonLog } = require('./logger');
+        const { writeJsonLog } = require("./logger");
         writeJsonLog("completed", "success", runId, {
           duration: duration,
           pid: pid,
@@ -367,15 +400,17 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
           cmd: command,
           output: "(通过PID检测判定完成)",
         });
-      } else if (processInfo.status === 'failed') {
+      } else if (processInfo.status === "failed") {
         status = "failed";
         endTime = new Date();
         duration = (endTime.getTime() - startTime.getTime()) / 1000; // 转换为秒
         exitCode = -2; // 表示基于检测判定为失败
-        console.log(`[extractRunInfo] 检测到PID ${pid} 已失败，基于进程状态判定`);
+        console.log(
+          `[extractRunInfo] 检测到PID ${pid} 已失败，基于进程状态判定`,
+        );
 
         // 写入failed事件到JSONL,避免下次再计算
-        const { writeJsonLog } = require('./logger');
+        const { writeJsonLog } = require("./logger");
         writeJsonLog("failed", "error", runId, {
           duration: duration,
           exit_code: exitCode,
@@ -497,7 +532,10 @@ export function getAllRunStatus(daysToKeep: number = 7): {
  * 清空所有历史记录
  * 删除所有日志文件和索引，但保留正在运行的任务
  */
-export function clearAllHistory(): { deletedCount: number; runningCount: number } {
+export function clearAllHistory(): {
+  deletedCount: number;
+  runningCount: number;
+} {
   const entries = readLogEntries();
   const grouped = groupLogsByRunId(entries);
   const { running, completed, failed } = categorizeRuns(grouped);
@@ -518,27 +556,32 @@ export function clearAllHistory(): { deletedCount: number; runningCount: number 
 
   // 清空 JSONL 日志，但保留正在运行的任务记录
   const runningRunIds = new Set(running.map((r) => r.runId));
-  const filteredEntries = entries.filter((entry) => runningRunIds.has(entry.runId));
+  const filteredEntries = entries.filter((entry) =>
+    runningRunIds.has(entry.runId),
+  );
 
   try {
     if (filteredEntries.length > 0) {
       // 重写 JSONL 日志，只保留运行中的任务
-      const jsonlContent = filteredEntries
-        .map((entry) => {
-          return JSON.stringify({
-            ts: entry.timestamp,
-            event: entry.event,
-            status: entry.status,
-            run_id: entry.runId,
-            ...(entry.target && { target: entry.target }),
-            ...(entry.workDir && { work_dir: entry.workDir }),
-            ...(entry.cmd && { cmd: entry.cmd }),
-            ...(entry.duration !== undefined && { duration: entry.duration }),
-            ...(entry.exitCode !== undefined && { exit_code: entry.exitCode }),
-            ...(entry.pid !== undefined && { pid: entry.pid }),
-          });
-        })
-        .join("\n") + "\n";
+      const jsonlContent =
+        filteredEntries
+          .map((entry) => {
+            return JSON.stringify({
+              ts: entry.timestamp,
+              event: entry.event,
+              status: entry.status,
+              run_id: entry.runId,
+              ...(entry.target && { target: entry.target }),
+              ...(entry.workDir && { work_dir: entry.workDir }),
+              ...(entry.cmd && { cmd: entry.cmd }),
+              ...(entry.duration !== undefined && { duration: entry.duration }),
+              ...(entry.exitCode !== undefined && {
+                exit_code: entry.exitCode,
+              }),
+              ...(entry.pid !== undefined && { pid: entry.pid }),
+            });
+          })
+          .join("\n") + "\n";
       writeFileSync(JSONL_LOG, jsonlContent);
     } else {
       // 如果没有运行中的任务，清空 JSONL 文件

@@ -17,7 +17,16 @@ import React, { useState, useEffect, useRef } from "react";
 import { executeClaudeCommand, executeClaudeStreaming, getConfig } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
 import { scanCommands, ClaudeCommand } from "./utils/commands";
-import { getSelectedDevonThinkRecords, checkDevonThinkAvailable, prepareFilePathForCommand, isDevonThinkURL, isFilesNoIndexPath, DevonThinkRecord, getFrontmostApplication, isFinderFrontmost } from "./utils/devonthink";
+import {
+  getSelectedDevonThinkRecords,
+  checkDevonThinkAvailable,
+  prepareFilePathForCommand,
+  isDevonThinkURL,
+  isFilesNoIndexPath,
+  DevonThinkRecord,
+  getFrontmostApplication,
+  isFinderFrontmost,
+} from "./utils/devonthink";
 import { readdirSync, statSync } from "fs";
 import { join } from "path";
 import { toggleCommandPinned, toggleCommandNew } from "./utils/commandMetadata";
@@ -31,9 +40,13 @@ export default function CommandList() {
   const [filteredCommands, setFilteredCommands] = useState<ClaudeCommand[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
-  const [devonThinkRecords, setDevonThinkRecords] = useState<Map<string, DevonThinkRecord>>(new Map()); // 存储完整的记录信息
+  const [devonThinkRecords, setDevonThinkRecords] = useState<
+    Map<string, DevonThinkRecord>
+  >(new Map()); // 存储完整的记录信息
   const [activeFile, setActiveFile] = useState<string>("");
-  const [processingCommand, setProcessingCommand] = useState<string | null>(null);
+  const [processingCommand, setProcessingCommand] = useState<string | null>(
+    null,
+  );
   const [refreshKey, setRefreshKey] = useState(0);
   const [note, setNote] = useState<string>("");
   const [runningCount, setRunningCount] = useState<number>(0);
@@ -73,7 +86,8 @@ export default function CommandList() {
       setCommands(availableCommands);
       setFilteredCommands(availableCommands);
     } catch (error) {
-      const isConfigError = error instanceof Error && (error as any).isConfigError;
+      const isConfigError =
+        error instanceof Error && (error as any).isConfigError;
 
       await showToast({
         style: Toast.Style.Failure,
@@ -93,7 +107,9 @@ export default function CommandList() {
 
   async function loadSelectedFiles(forceUpdate: boolean = false) {
     const timestamp = new Date().toISOString();
-    console.log(`[loadSelectedFiles] Called at ${timestamp}, forceUpdate: ${forceUpdate}`);
+    console.log(
+      `[loadSelectedFiles] Called at ${timestamp}, forceUpdate: ${forceUpdate}`,
+    );
 
     let filePaths: string[] = [];
     let source = "";
@@ -112,17 +128,26 @@ export default function CommandList() {
         try {
           const items = await getSelectedFinderItems();
           filePaths = items.map((item) => item.path);
-          console.log(`[loadSelectedFiles] Got ${filePaths.length} files from Finder:`, filePaths);
+          console.log(
+            `[loadSelectedFiles] Got ${filePaths.length} files from Finder:`,
+            filePaths,
+          );
 
           if (filePaths.length > 0) {
             source = "Finder";
           }
         } catch (error) {
-          console.error("[loadSelectedFiles] Failed to get Finder items:", error);
+          console.error(
+            "[loadSelectedFiles] Failed to get Finder items:",
+            error,
+          );
         }
       }
       // 如果前台是 DEVONthink，从 DEVONthink 获取文件
-      else if (frontApp.toLowerCase().includes("devon") || frontApp.toLowerCase().includes("think")) {
+      else if (
+        frontApp.toLowerCase().includes("devon") ||
+        frontApp.toLowerCase().includes("think")
+      ) {
         console.log(`[loadSelectedFiles] Using DEVONthink (frontmost)`);
         try {
           const isDevonThinkAvailable = await checkDevonThinkAvailable();
@@ -130,7 +155,10 @@ export default function CommandList() {
           if (isDevonThinkAvailable) {
             const records = await getSelectedDevonThinkRecords();
             filePaths = records.map((record) => record.path);
-            console.log(`[loadSelectedFiles] Got ${filePaths.length} files from DEVONthink:`, filePaths);
+            console.log(
+              `[loadSelectedFiles] Got ${filePaths.length} files from DEVONthink:`,
+              filePaths,
+            );
 
             // 存储记录信息以便后续使用
             records.forEach((record) => {
@@ -142,51 +170,79 @@ export default function CommandList() {
             }
           }
         } catch (error) {
-          console.error("[loadSelectedFiles] Failed to get DEVONthink records:", error);
+          console.error(
+            "[loadSelectedFiles] Failed to get DEVONthink records:",
+            error,
+          );
         }
       }
       // 如果前台不是 Finder 或 DEVONthink，尝试从 Finder 获取（作为后备）
       else {
-        console.log(`[loadSelectedFiles] Frontmost is ${frontApp}, trying Finder as fallback`);
+        console.log(
+          `[loadSelectedFiles] Frontmost is ${frontApp}, trying Finder as fallback`,
+        );
         try {
           const items = await getSelectedFinderItems();
           filePaths = items.map((item) => item.path);
-          console.log(`[loadSelectedFiles] Got ${filePaths.length} files from Finder (fallback):`, filePaths);
+          console.log(
+            `[loadSelectedFiles] Got ${filePaths.length} files from Finder (fallback):`,
+            filePaths,
+          );
 
           if (filePaths.length > 0) {
             source = "Finder";
           }
         } catch (error) {
-          console.error("[loadSelectedFiles] Failed to get Finder items (fallback):", error);
+          console.error(
+            "[loadSelectedFiles] Failed to get Finder items (fallback):",
+            error,
+          );
         }
       }
     } catch (error) {
-      console.error("[loadSelectedFiles] Failed to detect frontmost app:", error);
+      console.error(
+        "[loadSelectedFiles] Failed to detect frontmost app:",
+        error,
+      );
       // 作为最后的后备，尝试从 Finder 获取
       try {
         const items = await getSelectedFinderItems();
         filePaths = items.map((item) => item.path);
-        console.log(`[loadSelectedFiles] Got ${filePaths.length} files from Finder (emergency fallback):`, filePaths);
+        console.log(
+          `[loadSelectedFiles] Got ${filePaths.length} files from Finder (emergency fallback):`,
+          filePaths,
+        );
 
         if (filePaths.length > 0) {
           source = "Finder";
         }
       } catch (err) {
-        console.error("[loadSelectedFiles] Failed to get Finder items (emergency fallback):", err);
+        console.error(
+          "[loadSelectedFiles] Failed to get Finder items (emergency fallback):",
+          err,
+        );
       }
     }
 
     console.log(`[loadSelectedFiles] Final filePaths:`, filePaths);
-    console.log(`[loadSelectedFiles] Current activeFile before update:`, activeFile);
+    console.log(
+      `[loadSelectedFiles] Current activeFile before update:`,
+      activeFile,
+    );
 
     if (filePaths.length === 0) {
-      console.log(`[loadSelectedFiles] No files found, keeping existing selection`);
+      console.log(
+        `[loadSelectedFiles] No files found, keeping existing selection`,
+      );
 
       if (forceUpdate) {
         await showToast({
           style: Toast.Style.Failure,
           title: "未获取到选中文件",
-          message: selectedFiles.length > 0 ? "已保留上次选择" : "请在 Finder 或 DEVONthink 中选择文件",
+          message:
+            selectedFiles.length > 0
+              ? "已保留上次选择"
+              : "请在 Finder 或 DEVONthink 中选择文件",
         });
       }
 
@@ -207,10 +263,13 @@ export default function CommandList() {
       await showToast({
         style: Toast.Style.Success,
         title: `从 ${source} 获取了 ${filePaths.length} 个文件`,
-        message: filePaths.length === 1 ? filePaths[0].split("/").pop() : undefined,
+        message:
+          filePaths.length === 1 ? filePaths[0].split("/").pop() : undefined,
       });
     } else {
-      console.log(`[loadSelectedFiles] Not showing toast. forceUpdate: ${forceUpdate}, newActiveFile === activeFile: ${newActiveFile === activeFile}`);
+      console.log(
+        `[loadSelectedFiles] Not showing toast. forceUpdate: ${forceUpdate}, newActiveFile === activeFile: ${newActiveFile === activeFile}`,
+      );
     }
 
     setActiveFile(newActiveFile);
@@ -223,8 +282,11 @@ export default function CommandList() {
     }
 
     // 对于需要文件参数的命令，检查是否选中了文件
-    const validFiles = selectedFiles.filter((file) => file && file.trim().length > 0);
-    const executionFile = activeFile && activeFile.trim().length > 0 ? activeFile : validFiles[0];
+    const validFiles = selectedFiles.filter(
+      (file) => file && file.trim().length > 0,
+    );
+    const executionFile =
+      activeFile && activeFile.trim().length > 0 ? activeFile : validFiles[0];
 
     if (command.name !== "deepresearch" && command.name !== "sync-external") {
       if (!executionFile) {
@@ -238,12 +300,16 @@ export default function CommandList() {
 
       if (executionFile !== activeFile) {
         setActiveFile(executionFile);
-        console.log(`[executeCommand] Active file updated to: ${executionFile}`);
+        console.log(
+          `[executeCommand] Active file updated to: ${executionFile}`,
+        );
       }
 
       if (validFiles.length > 0 && validFiles[0] !== selectedFiles[0]) {
         setSelectedFiles(validFiles);
-        console.log(`[executeCommand] Filtered out empty paths. Using first valid file: ${validFiles[0]}`);
+        console.log(
+          `[executeCommand] Filtered out empty paths. Using first valid file: ${validFiles[0]}`,
+        );
       }
     }
 
@@ -266,9 +332,15 @@ export default function CommandList() {
 
     // 检查是否需要从 DevonThink 导出文件
     let actualFilePath = executionFile || "";
-    const record = executionFile ? devonThinkRecords.get(executionFile) : undefined;
+    const record = executionFile
+      ? devonThinkRecords.get(executionFile)
+      : undefined;
 
-    if (record && executionFile && (isDevonThinkURL(executionFile) || isFilesNoIndexPath(executionFile))) {
+    if (
+      record &&
+      executionFile &&
+      (isDevonThinkURL(executionFile) || isFilesNoIndexPath(executionFile))
+    ) {
       const toast = await showToast({
         style: Toast.Style.Animated,
         title: "正在导出文件",
@@ -317,11 +389,13 @@ export default function CommandList() {
 
       const logger = new RunLogger(
         actualFilePath || command.name,
-        projectDir  // 使用项目目录而不是文件所在目录
+        projectDir, // 使用项目目录而不是文件所在目录
       );
 
       logger.logValidated();
-      console.log(`[executeCommand] Logger validated, Run ID: ${logger.getRunId()}`);
+      console.log(
+        `[executeCommand] Logger validated, Run ID: ${logger.getRunId()}`,
+      );
 
       // 启动实时日志流
       logger.startRealtimeLogging();
@@ -329,7 +403,11 @@ export default function CommandList() {
 
       // 构建命令参数
       let prompt = `/${command.name}`;
-      if (actualFilePath && command.name !== "deepresearch" && command.name !== "sync-external") {
+      if (
+        actualFilePath &&
+        command.name !== "deepresearch" &&
+        command.name !== "sync-external"
+      ) {
         prompt = `/${command.name} "${actualFilePath}"`;
       }
 
@@ -383,7 +461,9 @@ export default function CommandList() {
         );
       }
 
-      console.log(`[executeCommand] Command completed, PID: ${result.pid}, Exit code: ${result.exitCode}, Success: ${result.success}`);
+      console.log(
+        `[executeCommand] Command completed, PID: ${result.pid}, Exit code: ${result.exitCode}, Success: ${result.success}`,
+      );
 
       // 注意：logExecuting 已经在 executeClaudeCommand 中调用过了，这里不需要再调用
       // logCompleted 在上面的 if-else 块中已经调用过了
@@ -441,11 +521,11 @@ export default function CommandList() {
 
         const logger = new RunLogger(
           actualFilePath || command.name,
-          projectDir  // 使用项目目录而不是文件所在目录
+          projectDir, // 使用项目目录而不是文件所在目录
         );
         logger.logCompleted(
           error instanceof Error ? error.message : "未知错误",
-          1
+          1,
         );
       } catch (logError) {
         console.error(`[executeCommand] Failed to log error:`, logError);
@@ -463,7 +543,9 @@ export default function CommandList() {
   /**
    * 获取文件夹中的文件列表
    */
-  function getDirectoryContents(dirPath: string): { name: string; path: string; isDir: boolean }[] {
+  function getDirectoryContents(
+    dirPath: string,
+  ): { name: string; path: string; isDir: boolean }[] {
     try {
       const files = readdirSync(dirPath);
       return files
@@ -496,7 +578,7 @@ export default function CommandList() {
     const k = 1024;
     const sizes = ["B", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
   }
 
   /**
@@ -712,13 +794,23 @@ export default function CommandList() {
               icon={command.icon}
               accessories={[
                 {
-                  text: processingCommand === command.name ? "执行中..." : undefined,
-                  icon: processingCommand === command.name ? Icon.CircleProgress : undefined,
+                  text:
+                    processingCommand === command.name
+                      ? "执行中..."
+                      : undefined,
+                  icon:
+                    processingCommand === command.name
+                      ? Icon.CircleProgress
+                      : undefined,
                 },
                 command.pinned ? { text: "置顶", icon: Icon.Pin } : null,
-                command.isNew && !command.pinned ? { text: "新", icon: Icon.Star } : null,
+                command.isNew && !command.pinned
+                  ? { text: "新", icon: Icon.Star }
+                  : null,
                 // 显示项目来源
-                command.projectName ? { text: command.projectName, icon: Icon.Folder } : null,
+                command.projectName
+                  ? { text: command.projectName, icon: Icon.Folder }
+                  : null,
               ].filter(Boolean)}
               actions={
                 <ActionPanel>
