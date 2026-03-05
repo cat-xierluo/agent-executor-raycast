@@ -75,6 +75,22 @@
       "title": "后台运行模式",
       "description": "启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。",
       "default": true
+    },
+    {
+      "name": "enableDefaultSkills",
+      "type": "checkbox",
+      "required": false,
+      "title": "启用默认 Skills 目录",
+      "description": "自动扫描 ~/.claude/skills/ 目录中的 Skills",
+      "default": true
+    },
+    {
+      "name": "streamingMode",
+      "type": "checkbox",
+      "required": false,
+      "title": "流式输出模式",
+      "description": "实时显示 Claude 的输出（类似 SkillLauncher）",
+      "default": false
     }
   ],
   "dependencies": {

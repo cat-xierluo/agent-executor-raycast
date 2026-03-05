@@ -13,7 +13,7 @@ import {
   openCommandPreferences,
 } from "@raycast/api";
 import React, { useState, useEffect } from "react";
-import { executeClaudeCommand, getConfig } from "./utils/claude";
+import { executeClaudeCommand, executeClaudeStreaming, getConfig } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
 import { scanCommands, ClaudeCommand } from "./utils/commands";
 import { getSelectedDevonThinkRecords, checkDevonThinkAvailable, prepareFilePathForCommand, isDevonThinkURL, isFilesNoIndexPath, DevonThinkRecord, getFrontmostApplication, isFinderFrontmost } from "./utils/devonthink";
@@ -334,22 +334,47 @@ export default function CommandList() {
 
       console.log(`[executeCommand] Executing command: ${prompt}`);
 
-      const result = await executeClaudeCommand(
-        {
+      let result;
+      
+      if (config.streamingMode) {
+        // 流式输出模式
+        let fullOutput = "";
+        
+        result = await executeClaudeStreaming({
           prompt,
-          workDir: projectDir,  // 使用项目目录
-          projectDir: projectDir, // 使用命令所属的项目目录
+          workDir: projectDir,
+          projectDir: projectDir,
           claudeBin: config.claudeBin,
           headlessMode: config.headlessMode,
-        },
-        logger  // 传递 logger 以启用实时日志
-      );
+          onChunk: (chunk, isFinal) => {
+            fullOutput += chunk;
+            // 可以在这里更新 UI 显示实时输出
+            if (!isFinal) {
+              console.log(`[streaming] ${chunk}`);
+            }
+          },
+        });
+        
+        // 流式模式也记录日志
+        logger.logCompleted(fullOutput, result.exitCode);
+      } else {
+        // 普通模式
+        result = await executeClaudeCommand(
+          {
+            prompt,
+            workDir: projectDir,  // 使用项目目录
+            projectDir: projectDir, // 使用命令所属的项目目录
+            claudeBin: config.claudeBin,
+            headlessMode: config.headlessMode,
+          },
+          logger  // 传递 logger 以启用实时日志
+        );
+      }
 
       console.log(`[executeCommand] Command completed, PID: ${result.pid}, Exit code: ${result.exitCode}, Success: ${result.success}`);
 
       // 注意：logExecuting 已经在 executeClaudeCommand 中调用过了，这里不需要再调用
-      // 直接调用 logCompleted 来完成日志
-      logger.logCompleted(result.output, result.exitCode);
+      // logCompleted 在上面的 if-else 块中已经调用过了
 
       // 记录统计数据
       const executionDuration = Date.now() - executionStartTime;
