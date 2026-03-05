@@ -5,11 +5,11 @@ import { readFileSync, readdirSync, existsSync, unlinkSync, writeFileSync, chmod
 import { getPreferenceValues } from "@raycast/api";
 
 export interface AgentExecutorConfig {
-  projectDirs: string[];  // 改为数组，支持多个项目目录
-  skillsDirs: string[];   // 新增：支持 skills 目录
+  projectDirs: string[];  // 扫描 .claude/commands/ 目录
+  skillsDirs: string[];   // 扫描 ~/.claude/skills/ 目录
   claudeBin: string;
   headlessMode: boolean;
-  streamingMode: boolean; // 新增：流式输出模式
+  streamingMode: boolean;
 }
 
 export interface Preferences {

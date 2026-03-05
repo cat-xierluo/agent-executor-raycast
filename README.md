@@ -14,18 +14,23 @@
 ### 🔄 完全动态的命令系统
 
 - **自动扫描命令**: 从 `.claude/commands/` 目录动态加载所有命令
+- **Skills 支持**: 同时支持扫描 `~/.claude/skills/` 目录中的 Skills
 - **无需硬编码**: 添加、修改或删除命令无需修改代码
 - **@include 支持**: 完整支持 `@include` 指令,包括相对路径和 `~/` 绝对路径
 - **智能提取**: 自动从命令文件中提取标题、描述和图标
 
 ### 📋 命令管理原则
 
-**重要**: 本扩展不应硬编码任何特定命令。所有命令都通过扫描 `.claude/commands/` 目录动态生成。
+**重要**: 本扩展不应硬编码任何特定命令。所有命令都通过扫描以下目录动态生成：
+
+- **项目命令**: `.claude/commands/` 目录
+- **全局 Skills**: `~/.claude/skills/` 目录（可选）
 
 添加新命令的步骤:
 1. 在 `.claude/commands/` 目录创建 `.md` 文件(或使用 `@include` 引用)
-2. 命令会自动出现在 Raycast 扩展中
-3. 无需修改任何代码
+2. 或者在 `~/.claude/skills/` 目录创建 Skill
+3. 命令会自动出现在 Raycast 扩展中
+4. 无需修改任何代码
 
 ## 📁 项目结构
 
@@ -66,12 +71,15 @@ agent-executor-raycast/
 
 2. **创建项目目录结构**
 
-   确保你的项目包含 `.claude/commands/` 目录，并在其中创建命令文件（`.md` 格式）。
+   确保你的项目包含以下之一：
+   - `.claude/commands/` 目录（项目命令）
+   - `~/.claude/skills/` 目录（全局 Skills，可选）
 
 3. **配置 Raycast 扩展设置**
 
    安装本扩展后，需要在 Raycast 扩展设置中配置：
    - **项目目录**：包含 `.claude/commands/` 的项目路径
+   - **启用默认 Skills 目录**：自动扫描 `~/.claude/skills/`（默认开启）
    - **Claude CLI 路径**（可选）：如果 CLI 不在默认路径 `~/.local/bin/claude`
 
 ## 🚀 快速开始
