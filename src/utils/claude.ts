@@ -6,8 +6,10 @@ import { getPreferenceValues } from "@raycast/api";
 
 export interface AgentExecutorConfig {
   projectDirs: string[];  // 改为数组，支持多个项目目录
+  skillsDirs: string[];   // 新增：支持 skills 目录
   claudeBin: string;
   headlessMode: boolean;
+  streamingMode: boolean; // 新增：流式输出模式
 }
 
 export interface Preferences {
@@ -18,6 +20,28 @@ export interface Preferences {
   projectDir5?: string;
   claudeBin?: string;
   headlessMode?: boolean;
+  enableDefaultSkills?: boolean; // 新增：是否启用默认 ~/.claude/skills/
+  streamingMode?: boolean; // 新增：是否启用流式输出
+}
+
+/**
+ * 验证目录是否是有效的 skills 目录（包含 SKILL.md 文件）
+ */
+export function isValidSkillsDir(dir: string): boolean {
+  if (!existsSync(dir)) return false;
+  
+  try {
+    const entries = readdirSync(dir, { withFileTypes: true });
+    // 检查是否有子目录包含 SKILL.md
+    return entries.some(entry => {
+      if (entry.isDirectory()) {
+        return existsSync(join(dir, entry.name, "SKILL.md"));
+      }
+      return false;
+    });
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -84,10 +108,23 @@ export function loadConfig(): AgentExecutorConfig {
   // headlessMode 默认为 true（向后兼容）
   const headlessMode = prefs.headlessMode !== false;
 
+  // streamingMode 默认为 false（向后兼容）
+  const streamingMode = prefs.streamingMode === true;
+
+  // 支持默认 ~/.claude/skills/ 目录
+  const defaultSkillsDir = join(homedir(), ".claude/skills");
+  const skillsDirs: string[] = [];
+  
+  if (prefs.enableDefaultSkills !== false && isValidSkillsDir(defaultSkillsDir)) {
+    skillsDirs.push(defaultSkillsDir);
+  }
+
   return {
     projectDirs: validDirs,
+    skillsDirs,
     claudeBin,
     headlessMode,
+    streamingMode,
   };
 }
 
@@ -117,6 +154,139 @@ export interface ClaudeExecutionResult {
   duration: number;
   pid?: number;
   sessionId?: string;  // Claude Code session ID，用于恢复对话
+}
+
+/**
+ * 流式输出的回调类型
+ */
+export type StreamingCallback = (chunk: string, isFinal: boolean) => void;
+
+/**
+ * 流式执行选项
+ */
+export interface ClaudeStreamingOptions {
+  prompt: string;
+  workDir: string;
+  projectDir: string;
+  claudeBin?: string;
+  headlessMode?: boolean;
+  onChunk?: StreamingCallback;  // 流式输出回调
+}
+
+/**
+ * 使用流式输出执行 Claude 命令
+ * 借鉴自 SkillLauncher 的实现
+ */
+export async function executeClaudeStreaming(
+  options: ClaudeStreamingOptions
+): Promise<ClaudeExecutionResult> {
+  const { projectDir, claudeBin: customClaudeBin, prompt, workDir, headlessMode = true, onChunk } = options;
+  const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
+  const startTime = Date.now();
+
+  // 流式模式只能在 headless 模式下使用
+  if (!headlessMode) {
+    return {
+      success: false,
+      output: "流式输出仅支持 headless 模式",
+      error: "流式输出仅支持 headless 模式",
+      exitCode: 1,
+      duration: 0,
+    };
+  }
+
+  return new Promise((resolve) => {
+    let pid: number | undefined;
+    let fullOutput = "";
+    let sessionId: string | undefined;
+
+    // 使用 stream-json 格式获取流式输出
+    const bashCommand = `cd "${projectDir}" && "${claudeBin}" -p "${prompt.replace(/"/g, '\\"')}" --output-format stream-json --verbose --include-partial-messages`;
+
+    const child = spawn('/bin/bash', ['-c', bashCommand], {
+      cwd: projectDir,
+      env: { ...process.env },
+      detached: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    pid = child.pid;
+
+    // 处理 stdout（JSON 流）
+    child.stdout?.on('data', (data: Buffer) => {
+      const lines = data.toString().split('\n').filter(line => line.trim());
+      
+      for (const line of lines) {
+        try {
+          // 尝试解析 JSON 行
+          const parsed = JSON.parse(line);
+          
+          // 处理不同类型的消息
+          if (parsed.type === 'content' || parsed.type === 'message') {
+            const text = parsed.delta?.text || parsed.content?.text || parsed.text || "";
+            if (text) {
+              fullOutput += text;
+              onChunk?.(text, false);
+            }
+          }
+          
+          // 提取 session_id
+          if (parsed.session_id && !sessionId) {
+            sessionId = parsed.session_id;
+          }
+          
+          // 检查是否是最终消息
+          if (parsed.type === 'done' || parsed.stop_reason) {
+            onChunk?.(fullOutput, true);
+          }
+        } catch {
+          // 非 JSON 行，直接追加（可能是纯文本）
+          const text = line.trim();
+          if (text && !text.startsWith('{')) {
+            fullOutput += text + '\n';
+            onChunk?.(text + '\n', false);
+          }
+        }
+      }
+    });
+
+    // 处理 stderr
+    child.stderr?.on('data', (data: Buffer) => {
+      const text = data.toString();
+      if (text) {
+        fullOutput += text;
+        onChunk?.(text, false);
+      }
+    });
+
+    // 处理进程结束
+    child.on('close', (code) => {
+      const duration = Date.now() - startTime;
+      
+      resolve({
+        success: code === 0,
+        output: fullOutput || "(无输出)",
+        error: code !== 0 ? fullOutput : undefined,
+        exitCode: code || 0,
+        duration,
+        pid,
+        sessionId,
+      });
+    });
+
+    child.on('error', (error) => {
+      const duration = Date.now() - startTime;
+      resolve({
+        success: false,
+        output: error.message,
+        error: error.message,
+        exitCode: 1,
+        duration,
+        pid,
+        sessionId,
+      });
+    });
+  });
 }
 
 export async function executeClaudeCommand(
