@@ -11,8 +11,9 @@ import {
   showHUD,
   confirmAlert,
   openCommandPreferences,
+  Detail,
 } from "@raycast/api";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { executeClaudeCommand, executeClaudeStreaming, getConfig } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
 import { scanCommands, ClaudeCommand } from "./utils/commands";
@@ -36,6 +37,11 @@ export default function CommandList() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [note, setNote] = useState<string>("");
   const [runningCount, setRunningCount] = useState<number>(0);
+  
+  // 流式输出相关状态
+  const [streamingOutput, setStreamingOutput] = useState<string>("");
+  const [isStreaming, setIsStreaming] = useState<boolean>(false);
+  const [streamingCommand, setStreamingCommand] = useState<string | null>(null);
 
   useEffect(() => {
     const timestamp = new Date().toISOString();
@@ -337,8 +343,13 @@ export default function CommandList() {
       let result;
       
       if (config.streamingMode) {
-        // 流式输出模式
+        // 流式输出模式 - 实时更新 UI
         let fullOutput = "";
+        
+        // 初始化流式输出状态
+        setStreamingOutput(`› ${prompt}\n\n`);
+        setIsStreaming(true);
+        setStreamingCommand(command.title);
         
         result = await executeClaudeStreaming({
           prompt,
@@ -348,9 +359,10 @@ export default function CommandList() {
           headlessMode: config.headlessMode,
           onChunk: (chunk, isFinal) => {
             fullOutput += chunk;
-            // 可以在这里更新 UI 显示实时输出
-            if (!isFinal) {
-              console.log(`[streaming] ${chunk}`);
+            // 更新 UI 显示实时输出
+            setStreamingOutput((prev) => prev + chunk);
+            if (isFinal) {
+              setIsStreaming(false);
             }
           },
         });
@@ -381,24 +393,43 @@ export default function CommandList() {
       recordExecution(command.name, result.success, executionDuration);
 
       if (result.success) {
-        await toast.hide();
-        // 可见模式显示不同的提示
-        if (config.headlessMode) {
-          await showHUD(`✅ ${command.title} 完成 (${Math.round(result.duration / 1000)}s)`);
+        // 流式模式下不自动关闭，让用户查看输出
+        if (!config.streamingMode) {
+          await toast.hide();
+          // 可见模式显示不同的提示
+          if (config.headlessMode) {
+            await showHUD(`✅ ${command.title} 完成 (${Math.round(result.duration / 1000)}s)`);
+          } else {
+            await showHUD(`🖥️ ${command.title} 已在 Terminal 窗口中执行`);
+          }
+          await closeMainWindow();
         } else {
-          await showHUD(`🖥️ ${command.title} 已在 Terminal 窗口中执行`);
+          // 流式模式：添加完成提示
+          setStreamingOutput((prev) => prev + `\n\n✅ 命令执行完成 (${Math.round(result.duration / 1000)}s)\n`);
         }
-        await closeMainWindow();
       } else {
-        toast.style = Toast.Style.Failure;
-        toast.title = "执行失败";
-        toast.message = `退出码: ${result.exitCode}`;
+        if (!config.streamingMode) {
+          toast.style = Toast.Style.Failure;
+          toast.title = "执行失败";
+          toast.message = `退出码: ${result.exitCode}`;
+        } else {
+          // 流式模式：添加错误提示
+          setStreamingOutput((prev) => prev + `\n\n❌ 执行失败 (退出码: ${result.exitCode})\n`);
+        }
       }
     } catch (error) {
       console.error(`[executeCommand] Error:`, error);
-      toast.style = Toast.Style.Failure;
-      toast.title = "执行失败";
-      toast.message = error instanceof Error ? error.message : "未知错误";
+      
+      // 流式模式下更新输出， 普通模式显示 toast
+      const config = getConfig();
+      if (config.streamingMode) {
+        setStreamingOutput((prev) => prev + `\n\n❌ 错误: ${error instanceof Error ? error.message : "未知错误"}\n`);
+        setIsStreaming(false);
+      } else {
+        toast.style = Toast.Style.Failure;
+        toast.title = "执行失败";
+        toast.message = error instanceof Error ? error.message : "未知错误";
+      }
 
       // 记录失败的统计数据
       const executionDuration = Date.now() - executionStartTime;
@@ -406,7 +437,6 @@ export default function CommandList() {
 
       // 尝试记录错误到日志
       try {
-        const config = getConfig();
         const projectDir = command.projectDir || config.projectDirs[0];
 
         const logger = new RunLogger(
@@ -422,6 +452,9 @@ export default function CommandList() {
       }
     } finally {
       setProcessingCommand(null);
+      if (config.streamingMode) {
+        setIsStreaming(false);
+      }
       loadRunningCount(); // 刷新运行计数
       triggerStatusRefresh(); // 立即刷新状态列表
     }
@@ -464,6 +497,50 @@ export default function CommandList() {
     const sizes = ["B", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+  }
+
+  /**
+   * 关闭流式输出视图
+   */
+  function closeStreamingOutput() {
+    setStreamingOutput("");
+    setIsStreaming(false);
+    setStreamingCommand(null);
+  }
+
+  // 如果有流式输出，显示流式输出视图
+  if (streamingOutput) {
+    return (
+      <Detail
+        markdown={
+          `\`\`\`\n${streamingOutput}\n\`\`\``
+        }
+        navigationTitle={streamingCommand ? `执行: ${streamingCommand}` : "流式输出"}
+        metadata={{
+          items: [
+            {
+              label: "状态",
+              value: isStreaming ? "🔄 执行中..." : "✅ 完成",
+            },
+          ],
+        }}
+        actions={
+          <ActionPanel>
+            <Action
+              title="关闭输出"
+              onAction={closeStreamingOutput}
+              icon={Icon.X}
+              shortcut={{ modifiers: ["cmd"], key: "w" }}
+            />
+            <Action
+              title="清空输出"
+              onAction={() => setStreamingOutput("")}
+              icon={Icon.Trash}
+            />
+          </ActionPanel>
+        }
+      />
+    );
   }
 
   return (
