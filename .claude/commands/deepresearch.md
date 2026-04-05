@@ -1,1 +1,1 @@
-@include ../../../SuitAgent/.claude/commands/deepresearch.md
+/Users/maoking/Library/Application Support/maoscripts/SuitAgent/.claude/commands/deepresearch.md
