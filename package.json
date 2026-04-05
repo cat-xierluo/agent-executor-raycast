@@ -2,7 +2,7 @@
   "$schema": "https://www.raycast.com/schemas/extension.json",
   "name": "agent-executor",
   "title": "Agent Executor",
-  "description": "执行 Claude Code 技能和命令的通用工具",
+  "description": "执行 Claude Code 技能（Skills）的通用工具",
   "icon": "terminal.png",
   "author": "maoking",
   "categories": [
@@ -14,13 +14,13 @@
     {
       "name": "commands",
       "title": "Agent Executor",
-      "description": "选择命令并输入附加留言后执行",
+      "description": "选择技能并输入附加留言后执行",
       "mode": "view"
     },
     {
       "name": "status",
       "title": "Agent 运行状态",
-      "description": "查看命令执行历史、运行状态和统计信息",
+      "description": "查看技能执行历史、运行状态和统计信息",
       "mode": "view"
     }
   ],
@@ -30,7 +30,7 @@
       "type": "directory",
       "required": true,
       "title": "项目目录",
-      "description": "Agent Executor 插件根目录（必填）"
+      "description": "包含 .claude/skills/ 的项目目录（必填）"
     },
     {
       "name": "projectDir2",

@@ -1,35 +1,40 @@
 # Agent Executor Raycast Extension
 
-使用 Raycast Extension API 执行 Claude Code 技能和命令的通用工具。
+使用 Raycast Extension API 执行 Claude Code 技能（Skills）的通用工具。
 
 ## ✨ 核心特性
 
-### 📊 命令状态追踪
+### 📡 流式输出
 
-- **实时状态监控**: 查看正在运行、已完成和失败的命令
-- **历史记录**: 自动保存最近 7 天的命令执行历史
+- **实时输出显示**: 开启后可在 Raycast 内实时查看 Claude 的执行过程，无需等待完成
+- **Session ID 捕获**: 自动提取 `session_id`，支持后续通过 `claude --resume` 恢复对话
+- **安全行缓冲**: 使用行缓冲机制防止 TCP 分包导致的 JSON 截断
+
+### 📊 执行状态追踪
+
+- **实时状态监控**: 查看正在运行、已完成和失败的技能
+- **历史记录**: 自动保存最近 7 天的执行历史
 - **日志详情**: 每次运行的详细日志，包括输出、错误和执行时长
 - **智能分类**: 按状态自动分组，快速找到需要的记录
 
-### 🔄 完全动态的命令系统
+### 🔄 完全动态的技能系统
 
-- **自动扫描命令**: 从 `.claude/commands/` 目录动态加载所有命令
-- **Skills 支持**: 同时支持扫描 `~/.claude/skills/` 目录中的 Skills
-- **无需硬编码**: 添加、修改或删除命令无需修改代码
-- **@include 支持**: 完整支持 `@include` 指令,包括相对路径和 `~/` 绝对路径
-- **智能提取**: 自动从命令文件中提取标题、描述和图标
+- **自动扫描技能**: 从 `.claude/skills/` 目录动态加载所有技能
+- **全局 Skills 支持**: 同时支持扫描 `~/.claude/skills/` 目录中的全局 Skills
+- **无需硬编码**: 添加、修改或删除技能无需修改代码
+- **智能提取**: 自动从 SKILL.md 文件中提取标题、描述和图标
 
-### 📋 命令管理原则
+### 📋 技能管理原则
 
-**重要**: 本扩展不应硬编码任何特定命令。所有命令都通过扫描以下目录动态生成：
+**重要**: 本扩展不硬编码任何特定技能。所有技能都通过扫描以下目录动态生成：
 
-- **项目命令**: `.claude/commands/` 目录
+- **项目技能**: 项目目录下的 `.claude/skills/` 目录
 - **全局 Skills**: `~/.claude/skills/` 目录（可选）
 
-添加新命令的步骤:
-1. 在 `.claude/commands/` 目录创建 `.md` 文件(或使用 `@include` 引用)
-2. 或者在 `~/.claude/skills/` 目录创建 Skill
-3. 命令会自动出现在 Raycast 扩展中
+添加新技能的步骤:
+1. 在 `.claude/skills/` 目录下创建子目录
+2. 在子目录中添加 `SKILL.md` 文件定义技能
+3. 技能会自动出现在 Raycast 扩展中
 4. 无需修改任何代码
 
 ## 📁 项目结构
@@ -37,15 +42,22 @@
 ```
 agent-executor-raycast/
 ├── src/
-│   ├── commands.tsx        # 动态命令列表(唯一入口)
-│   ├── status.tsx          # 状态追踪页面
+│   ├── commands.tsx           # 技能列表与执行入口
+│   ├── status.tsx             # 状态追踪页面
+│   ├── components/
+│   │   ├── StreamingOutput.tsx # 流式输出组件
+│   │   └── StatsComponents.tsx # 统计组件
+│   ├── contexts/
+│   │   └── StatusRefreshContext.tsx # 状态刷新上下文
 │   ├── utils/
-│   │   ├── commands.ts     # 命令扫描逻辑(支持@include)
-│   │   ├── claude.ts       # Claude Code CLI 执行 (headless mode)
-│   │   ├── logger.ts       # 日志记录
-│   │   ├── status.ts       # 状态追踪工具函数
-│   │   └── ...
-│   ├── logs-viewer.tsx     # 日志查看器
+│   │   ├── skills.ts          # Skills 扫描逻辑
+│   │   ├── claude.ts          # Claude Code CLI 执行（含流式输出）
+│   │   ├── commandMetadata.ts # 技能元数据管理
+│   │   ├── devonthink.ts      # DEVONthink 集成
+│   │   ├── logger.ts          # JSONL 日志记录
+│   │   ├── status.ts          # 状态追踪工具函数
+│   │   └── stats.ts           # 执行统计
+│   ├── logs-viewer.tsx        # 日志查看器
 │   └── ...
 ├── package.json
 ├── tsconfig.json
@@ -58,7 +70,7 @@ agent-executor-raycast/
 
 1. **安装 Claude Code CLI**
 
-   本扩展依赖 Claude Code CLI 来执行命令。请确保已安装并配置好 Claude Code CLI。
+   本扩展依赖 Claude Code CLI 来执行技能。请确保已安装并配置好 Claude Code CLI。
 
    ```bash
    # 检查 Claude CLI 是否已安装
@@ -71,27 +83,26 @@ agent-executor-raycast/
 
 2. **创建项目目录结构**
 
-   确保你的项目包含以下之一：
-   - `.claude/commands/` 目录（项目命令）
-   - `~/.claude/skills/` 目录（全局 Skills，可选）
+   确保你的项目包含：
+   - `.claude/skills/` 目录（项目技能）
 
 3. **配置 Raycast 扩展设置**
 
    安装本扩展后，需要在 Raycast 扩展设置中配置：
-   - **项目目录**：包含 `.claude/commands/` 的项目路径
+   - **项目目录**：包含 `.claude/skills/` 的项目路径
    - **启用默认 Skills 目录**：自动扫描 `~/.claude/skills/`（默认开启）
    - **Claude CLI 路径**（可选）：如果 CLI 不在默认路径 `~/.local/bin/claude`
 
 ## 🚀 快速开始
 
-### 步骤 1:安装依赖
+### 步骤 1: 安装依赖
 
 ```bash
 cd agent-executor-raycast
 npm install
 ```
 
-### 步骤 2:开发模式运行
+### 步骤 2: 开发模式运行
 
 ```bash
 npm run dev
@@ -99,319 +110,70 @@ npm run dev
 
 这将启动扩展开发模式,你可以在 Raycast 中看到扩展并进行测试。
 
-### 步骤 3:构建扩展
+### 步骤 3: 构建扩展
 
 ```bash
 npm run build
 ```
 
-## 📝 动态命令系统
+## 📝 动态技能系统
 
-### 命令来源
+### 技能目录结构
 
-所有命令都从 `.claude/commands/` 目录动态加载:
+所有技能从 `.claude/skills/` 目录动态加载，每个技能是一个包含 `SKILL.md` 的子目录：
 
 ```
-.claude/commands/
-├── deepresearch.md          # @include 引用外部文件
-├── sync-external.md         # @include 引用外部文件
-├── legal-router.md          # 本地命令文件
-├── legal-preprocess.md
-├── legal-proposal.md
-├── legal-search.md
-└── legal-analyze.md
+.claude/skills/
+├── mineru-ocr/
+│   └── SKILL.md
+├── skill-manager/
+│   └── SKILL.md
+└── deepresearch/
+    └── SKILL.md
 ```
 
-### @include 指令支持
+### 技能元数据提取
 
-#### 相对路径
-```markdown
-@include ../../SuitAgent/.claude/commands/deepresearch.md
-```
+扩展会自动从 SKILL.md 文件中提取：
 
-#### 绝对路径(支持 ~/)
-```markdown
-@include ~/Library/Application Support/maoscripts/SuitAgent/.claude/commands/sync-external.md
-```
-
-### 命令元数据提取
-
-扩展会自动从命令文件中提取:
-
-1. **标题**:
-   - 优先使用 frontmatter 中的 `name` 字段
-   - 其次使用文件中第一个一级标题 (`# 标题`)
-   - 否则使用格式化的文件名
-
-2. **描述**:
-   - 优先使用 frontmatter 中的 `description` 字段
-   - 其次查找包含"功能"、"描述"、"说明"等关键词的行
-   - 或者以 `>`, `**`, `*` 开头的行
-
-3. **图标**: 根据命令名称关键词智能匹配
+1. **标题**: 使用格式化的目录名
+2. **描述**: 从 frontmatter 或内容中提取
+3. **图标**: 根据技能名称关键词智能匹配
 
 ### Frontmatter 格式
 
 ```markdown
 ---
-name: 深度研究
-description: 对特定主题进行深度研究和分析
+description: 将文档转换为 Markdown 格式
 ---
 
-# 深度研究命令
+# Mineru OCR
 
-> 功能:对特定主题进行深度研究...
+> 功能: 将本地或远程文档转换为 Markdown...
 ```
 
 ## 🔧 配置
 
 在 Raycast 的扩展设置中可以配置:
 
-- **项目目录**: 包含 `.claude/commands/` 的项目目录（可配置多个）
+- **项目目录**: 包含 `.claude/skills/` 的项目目录（可配置最多 5 个）
+- **启用默认 Skills 目录**: 自动扫描 `~/.claude/skills/`（默认开启）
 - **Claude CLI 路径**: Claude Code CLI 可执行文件路径(默认: `~/.local/bin/claude`)
-- **后台运行模式**: 控制命令执行的可视化方式
-  - ✅ **启用（默认）**: 命令在后台静默运行，输出记录到日志文件
+- **后台运行模式**: 控制技能执行的可视化方式
+  - ✅ **启用（默认）**: 技能在后台静默运行，输出记录到日志文件
   - ❌ **禁用**: 在新的 Terminal 窗口中显示执行过程，适合调试和观察实时输出
-
-## 🎯 核心概念：项目目录与文件路径
-
-### 为什么需要分离项目目录和文件路径？
-
-本扩展在执行命令时使用两个概念，这是**命令依赖分离**的核心设计：
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  项目目录                          │
-│  - 命令定义所在的位置                                      │
-│  - 包含 .claude/commands/ 文件夹                         │
-│  - 示例: ~/maoscripts/AutoWeave                          │
-│                                                          │
-│  用途:                                                   │
-│  ✅ 读取命令定义文件 (如 .claude/commands/deepresearch.md)│
-│  ✅ 读取 @include 引用的文件                             │
-│  ✅ 读取项目配置 (如 .claude/ 下的其他文件)              │
-│  ✅ 确保相对路径正确解析                                  │
-└─────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────┐
-│  文件路径                               │
-│  - 用户选中文件的完整路径                                  │
-│  - 在 prompt 中传递给 Claude（用引号包裹）                 │
-│  - 示例: "~/Documents/cases/case001.pdf"                │
-│                                                          │
-│  用途:                                                   │
-│  ✅ 告诉 Claude 要处理哪个文件                            │
-│  ✅ Claude 可以读取、分析该文件                           │
-│  ✅ 引号确保路径中的空格被正确处理                          │
-└─────────────────────────────────────────────────────────┘
-```
-
-### CLI 模式执行机制
-
-本扩展使用 Claude Code CLI 的 **CLI 模式**（原称 Headless Mode）来执行命令。CLI 模式允许在非交互式环境中运行 Claude Code，这对于 Raycast 扩展这样的后台执行场景至关重要。
-
-**两种执行模式：**
-
-#### 1. 后台运行模式（默认）
-
-- ✅ **非交互式执行**：命令在后台执行，无需用户交互
-- ✅ **实时输出捕获**：通过管道捕获完整的终端输出
-- ✅ **进程管理**：支持 PID 追踪、进程状态监控和强制终止
-- ✅ **JSONL 日志流**：所有执行事件实时写入 JSONL 格式日志
-
-**执行流程：**
-```typescript
-// 使用 CLI 模式参数启动 Claude CLI
-spawn(claudeBin, [
-  "--print",                          // CLI 模式输出标志
-  "--dangerously-skip-permissions",   // 跳过权限确认（自动化场景）
-  prompt,                             // 命令 + 文件路径
-], {
-  cwd: projectDir,                    // 设置工作目录
-  stdio: ["pipe", "pipe", "pipe"]     // 捕获 stdin/stdout/stderr
-})
-```
-
-#### 2. 可视化模式（调试用）
-
-当禁用"后台运行模式"时，命令会在新的 Terminal 窗口中执行：
-
-- 🔍 **实时查看输出**：在终端窗口中观察命令执行过程
-- 🐛 **调试友好**：方便查看完整的执行日志和错误信息
-- 📝 **窗口保持打开**：执行完成后窗口保持打开，可手动关闭
-- ⚡ **使用场景**：程序调试、问题诊断、优化分析
-
-**技术实现：**
-
-```applescript
--- 使用 AppleScript 在新 Terminal 窗口中执行
-tell application "Terminal"
-  activate
-  do script "cd \"project_dir\" && claude --print \"prompt\""
-end tell
-```
-
-**关键技术点：**
-
-- **TTY 输出捕获**：确保捕获完整的终端输出（包括 ANSI 控制码）
-- **JSONL 事件流**：每个执行事件（开始、输出、结束）都作为独立的 JSON 行记录
-- **PID 检测**：从 Claude CLI 输出中自动提取 Agent PID，用于进程管理
-- **优雅终止**：支持通过 PID kill 正在运行的命令
-
-参考实现：[src/utils/claude.ts](agent-executor-raycast/src/utils/claude.ts)
-参考文档：[Claude Code CLI 模式文档](docs/CLAUDE_CODE_CLI_MODE.md)
-
-### 完整执行流程示例
-
-假设你选择 AutoWeave 项目中的 `deepresearch` 命令，并选中文件 `~/Documents/cases/case001.pdf`：
-
-#### 步骤 1: 命令扫描（应用启动时）
-
-```typescript
-// 扫描所有配置的项目目录
-scanCommands([
-  "~/maoscripts/AutoWeave",
-  "~/maoscripts/SuitAgent"
-])
-// → 发现 AutoWeave/.claude/commands/deepresearch.md
-// → 记录命令所属的项目目录
-```
-
-**扫描结果**：
-```javascript
-{
-  name: "deepresearch",
-  projectDir: "~/maoscripts/AutoWeave",  // ✅ 记录命令所属项目
-  filePath: "...AutoWeave/.claude/commands/deepresearch.md"
-}
-```
-
-#### 步骤 2: 构建执行参数
-
-```typescript
-// src/commands.tsx:320-343
-{
-  prompt: "/deepresearch \"~/Documents/cases/case001.pdf\"",  // 命令 + 文件路径
-  projectDir: "~/maoscripts/AutoWeave"  // 命令所属项目
-}
-```
-
-#### 步骤 3: 后端实际执行
-
-```typescript
-// src/utils/claude.ts:140-147
-const child = spawn(claudeBin, [
-  "--print",
-  "--dangerously-skip-permissions",
-  "/deepresearch \"~/Documents/cases/case001.pdf\"",  // 命令 + 文件路径
-], {
-  cwd: "~/maoscripts/AutoWeave"     // 设置进程工作目录
-});
-```
-
-**等效的终端命令**：
-```bash
-cd ~/maoscripts/AutoWeave              # 进入项目目录（命令定义所在位置）
-~/.local/bin/claude \
-  --print \
-  --dangerously-skip-permissions \
-  "/deepresearch \"~/Documents/cases/case001.pdf\""  # 命令 + 文件路径（引号包裹）
-```
-
-### 两个目录的协作
-
-#### `cwd: projectDir` (进程工作目录)
-```bash
-cd ~/maoscripts/AutoWeave
-```
-- **作用**：进程的**当前工作目录**
-- **关键用途**：
-  - ✅ 读取命令定义文件
-  - ✅ 读取 `@include` 引用的文件
-  - ✅ 读取项目配置文件
-  - ✅ 解析相对路径
-
-#### 文件路径在 prompt 中传递
-```bash
-/deepresearch "~/Documents/cases/case001.pdf"
-```
-- **作用**：在 prompt 中直接传递文件路径（用引号包裹）
-- **关键用途**：
-  - ✅ Claude AI 能够访问指定的文件
-  - ✅ 文件路径中的空格被正确处理
-  - ✅ 支持多文件路径（如果命令需要）
-
-### 为什么这样设计？
-
-如果只用一个目录会导致问题：
-
-❌ **问题 1**：在 `~/Documents/cases/` 目录执行
-
-```bash
-cd ~/Documents/cases
-claude "/deepresearch"  # ❌ 找不到 deepresearch.md 命令定义
-```
-
-❌ **问题 2**：在 `~/AutoWeave/` 目录执行（不传递文件路径）
-
-```bash
-cd ~/AutoWeave
-claude "/deepresearch"  # ❌ Claude 不知道要处理哪个文件
-```
-
-✅ **正确方案**：项目目录 + 文件路径
-
-```bash
-cd ~/AutoWeave  # 确保命令能读取定义和依赖
-claude "/deepresearch \"~/Documents/cases/case001.pdf\""  # 告诉 Claude 要处理哪个文件
-```
-
-### 多项目支持
-
-当你配置了多个项目目录时：
-
-```javascript
-配置的项目目录 = [
-  "~/maoscripts/AutoWeave",
-  "~/maoscripts/SuitAgent"
-]
-
-// 当你执行 deepresearch 命令时（来自 AutoWeave）
-{
-  prompt: "/deepresearch \"~/Documents/cases/case001.pdf\"",
-  projectDir: "~/maoscripts/AutoWeave"   // 自动使用命令所属的项目
-}
-
-// 当你执行 2word 命令时（来自 SuitAgent）
-{
-  prompt: "/2word \"~/Documents/cases/case001.pdf\"",
-  projectDir: "~/maoscripts/SuitAgent"   // 自动使用命令所属的项目
-}
-```
-
-**关键点**：
-- ✅ 每个命令自动在其所属的项目目录中执行
-- ✅ 文件路径在 prompt 中传递（用引号包裹）
-- ✅ 无需手动指定，系统自动识别
-- ✅ 支持跨项目命令协作
+- **流式输出模式**: 实时显示 Claude 的输出（默认关闭）
+  - ✅ **启用**: 在 Raycast 内实时查看执行过程，完成后不自动关闭窗口
+  - ❌ **禁用（默认）**: 技能完成后自动关闭窗口并显示 HUD 提示
+  - 仅在后台运行模式下生效
 
 ## 📊 日志系统
 
-扩展使用 **JSONL 格式**记录所有命令执行历史，保存在 `logs/raycast-extension.jsonl` 文件中。
-
-### 日志目录结构
-
-```text
-~/Library/Application Support/maoscripts/AutoWeave/agent-executor-raycast/logs/
-├── raycast-extension.jsonl  # JSONL 格式的结构化日志（主要日志文件）
-└── stats.json               # 运行统计信息
-```
-
-**注意**：系统已完全迁移到 JSONL-only 日志记录方式，不再使用传统的 `.log` 文件或索引文件。
+扩展使用 **JSONL 格式**记录所有技能执行历史，保存在 Raycast 扩展支持目录下的 `logs/` 中。
 
 ### 日志查看
 
-在 Raycast 中运行 "查看运行状态" 命令，可以：
+在 Raycast 中运行 "Agent 运行状态" 命令，可以：
 
 - 查看所有运行历史
 - 按时间倒序排列
@@ -422,43 +184,29 @@ claude "/deepresearch \"~/Documents/cases/case001.pdf\""  # 告诉 Claude 要处
 
 ### 日志内容
 
-每个运行日志包含：
-
-- Run ID（唯一标识符）
-- 进程 ID（PID）
-- 开始/结束时间
-- 执行时长
-- 目标文件路径
-- 工作目录
-- 执行命令
-- 完整输出（实时输出流 + 最终输出）
-- 退出码
+每个运行日志包含：Run ID、进程 ID（PID）、开始/结束时间、执行时长、目标文件路径、工作目录、执行命令、完整输出和退出码。
 
 详细的日志系统说明请参阅 [详细使用指南 - 日志系统详解](docs/DETAILED_GUIDE.md#-日志系统详解)。
 
 ## 📊 状态追踪系统
 
-状态追踪系统提供了对命令执行历史的完整可视化:
+状态追踪系统提供了对技能执行历史的完整可视化:
 
-- **查看所有正在运行的命令**
-- **浏览最近 7 天的命令执行历史**
+- **查看所有正在运行的技能**
+- **浏览最近 7 天的执行历史**
 - **查看每次运行的详细日志**
-- **快速诊断失败命令的原因**
+- **快速诊断失败的原因**
 
 ### 访问方式
 
-1. **独立命令**: 在 Raycast 中搜索并运行 "运行状态" 命令
-2. **从命令列表跳转**: 在命令列表页面按下 `Cmd+S` 或点击 "查看运行状态"
+1. **独立命令**: 在 Raycast 中搜索并运行 "Agent 运行状态" 命令
+2. **从技能列表跳转**: 在列表页面按下 `Cmd+S` 或点击 "查看 Agent 运行状态"
 
 ### 状态分类
 
-状态页面将命令执行记录分为三类：
-
-- **正在运行 (Running)**: 显示所有正在执行中的命令，每 5 秒自动刷新
-- **已完成 (Completed)**: 显示最近 7 天内成功完成的命令
-- **失败 (Failed)**: 显示最近 7 天内执行失败的命令
-
-详细的状态追踪说明请参阅 [详细使用指南](docs/DETAILED_GUIDE.md#-状态追踪系统)。
+- **正在运行 (Running)**: 显示所有正在执行中的技能，每 5 秒自动刷新
+- **已完成 (Completed)**: 显示最近 7 天内成功完成的技能
+- **失败 (Failed)**: 显示最近 7 天内执行失败的技能
 
 ## 🛠️ 开发
 
@@ -479,15 +227,15 @@ npm run fix-lint
 
 ## 🎯 设计原则
 
-1. **动态优于静态**: 所有命令通过扫描生成,不硬编码
-2. **单一入口**: 只有一个命令列表入口,显示所有可用命令
-3. **智能提取**: 自动从命令文件中提取元数据
-4. **@include 支持**: 完整支持命令文件引用机制
-5. **零配置添加**: 添加新命令只需创建 `.md` 文件
+1. **动态优于静态**: 所有技能通过扫描生成，不硬编码
+2. **单一入口**: 只有一个技能列表入口，显示所有可用技能
+3. **智能提取**: 自动从 SKILL.md 文件中提取元数据
+4. **零配置添加**: 添加新技能只需创建含 `SKILL.md` 的子目录
+5. **安全执行**: 使用 base64 编码传递 prompt，防止 shell 注入
 
 ## 📚 相关文档
 
-- [详细使用指南](docs/DETAILED_GUIDE.md) - 完整的扩展功能说明，包括动态命令系统、日志系统、状态追踪系统的详细技术细节
+- [详细使用指南](docs/DETAILED_GUIDE.md) - 完整的扩展功能说明
 - [故障排除指南](docs/TROUBLESHOOTING.md) - 详细的问题诊断和解决方案
 - [DevonThink 集成](docs/DEVONTHINK_INTEGRATION.md) - DevonThink 集成说明
 - [Raycast API 文档](https://developers.raycast.com/)

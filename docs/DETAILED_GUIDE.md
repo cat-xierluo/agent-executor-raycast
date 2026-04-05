@@ -5,6 +5,7 @@
 ## 目录
 
 - [动态命令系统](#-动态命令系统)
+- [流式输出系统](#-流式输出系统)
 - [日志系统详解](#-日志系统详解)
 - [状态追踪系统](#-状态追踪系统)
 - [技术实现细节](#-技术实现细节)
@@ -68,6 +69,35 @@ description: 对特定主题进行深度研究和分析
 
 > 功能:对特定主题进行深度研究...
 ```
+
+---
+
+## 📡 流式输出系统
+
+### 概述
+
+流式输出模式允许在 Raycast 内实时查看 Claude Code 的执行过程，无需等待命令完成。通过 `--output-format stream-json` 参数获取 JSON 流，使用行缓冲机制逐步解析并更新 UI。
+
+### 启用方式
+
+在 Raycast 扩展设置中开启"流式输出模式"，或在 `package.json` 的 preferences 中设置 `streamingMode: true`。
+
+> 流式输出仅在**后台运行模式（headless）**下生效。
+
+### 工作原理
+
+1. **JSON 流解析**：使用 `spawn` 启动 Claude CLI，通过 `--output-format stream-json` 获取 NDJSON 格式的实时输出
+2. **行缓冲**：维护 `lineBuffer` 缓冲区，防止 TCP 分包导致 JSON 对象被截断
+3. **事件回调**：通过 `onChunk(chunk, isFinal)` 回调逐步更新 UI 状态
+4. **Session 捕获**：自动从 JSON 流中提取 `session_id`
+
+### 支持的执行类型
+
+| 类型 | 流式支持 | 说明 |
+|------|----------|------|
+| Command | ✅ | `.claude/commands/*.md` 定义的命令 |
+| Skill | ✅ | `.claude/skills/*/SKILL.md` 定义的技能 |
+| Terminal 模式 | ❌ | 弹出终端窗口执行，不支持流式输出 |
 
 ---
 

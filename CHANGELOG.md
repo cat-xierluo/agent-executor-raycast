@@ -2,6 +2,69 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [0.5.0] - 2026-04-05
+
+### 变更 (Changed)
+
+- **移除 Commands 支持，统一为 Skills**：扩展不再扫描 `.claude/commands/` 目录，只使用 `.claude/skills/` 目录
+  - 删除 `src/utils/commands.ts`（命令扫描、@include 解析等逻辑）
+  - `commands.tsx` 移除 `executeCommand()` 函数，统一使用 `executeSkill()`
+  - `isValidProjectDir()` 改为检查 `.claude/skills/` 而非 `.claude/commands/`
+  - 移除 `ClaudeCommand` 类型和 `ExecutorItem` 联合类型，列表直接使用 `ClaudeSkill[]`
+  - UI 移除 Command/Skill 类型标签区分（都是 Skill）
+  - 空状态提示更新为"请在 .claude/skills/ 目录中添加技能"
+
+- **保留兼容层**：特定名称的 Skill 仍享有特殊处理
+  - `deepresearch`：不需要文件选择即可执行
+  - `sync-external`：执行前弹出确认对话框
+  - 通过 `SKILLS_NO_FILE_REQUIRED` 和 `SKILLS_REQUIRE_CONFIRM` 常量配置
+
+### 移除 (Removed)
+
+- `src/utils/commands.ts`：命令扫描、@include 解析、`ClaudeCommand` 接口等全部移除
+- `scanCommands()`、`readCommandContent()`、`readFileWithIncludes()` 函数
+- `toggleCommandPinned()`、`toggleCommandNew()` 调用（UI 统一使用 Skill 版本）
+
+## [0.4.0] - 2026-04-04
+
+### 新增 (Added)
+
+- **流式输出模式**：实时显示 Claude 的执行输出
+  - 新增 `executeClaudeStreaming()` 函数，使用 `--output-format stream-json` 获取实时 JSON 流
+  - 通过 `onChunk` 回调逐步更新 UI，用户无需等待命令完成即可看到输出
+  - 支持提取 `session_id`，可用于后续恢复对话
+  - 流式输出视图支持 `Cmd+W` 关闭和清空操作
+  - Commands 和 Skills 均支持流式输出
+
+- **流式输出组件**：新增 `StreamingOutput.tsx` 组件
+  - 使用 Raycast `Detail` 组件渲染 markdown 格式的流式内容
+  - 显示执行状态（执行中/已完成）
+  - 自动适配 Raycast 环境，不依赖浏览器 DOM API
+
+- **流式输出配置项**：新增 `streamingMode` 偏好设置
+  - 在 Raycast 扩展设置中可开启/关闭（默认关闭）
+  - 仅在 headless 模式下生效
+  - 开启后执行完成不自动关闭窗口，方便查看完整输出
+
+### 修复 (Fixed)
+
+- **`readdirSync` 未导入**：修复 `isValidSkillsDir()` 因缺少 `fs.readdirSync` 导入导致运行时崩溃
+- **`config` 作用域错误**：修复 `executeCommand()` 的 `finally` 块中 `config` 未定义导致的编译错误
+- **Detail metadata 类型错误**：移除不支持的 `metadata={{ items: [...] }}` 写法
+- **Icon.X 不存在**：替换为 Raycast API 支持的 `Icon.Xmark`
+- **Action.Style.Destructive 类型错误**：替换为 `Alert.ActionStyle.Destructive` 并添加 `Alert` 导入
+- **StatusRefreshContext cleanup 返回值**：修复 `useEffect` cleanup 函数返回 boolean 的类型错误
+- **RunInfo 缺少 workDir**：为 `RunInfo` 接口添加 `workDir` 字段
+- **DevonThink type 类型不兼容**：添加 `"file" | "directory"` 类型断言
+
+### 安全 (Security)
+
+- **Terminal 模式 prompt 注入修复**：使用 base64 编码传递 prompt，避免 shell 特殊字符导致的命令注入风险
+
+### 变更 (Changed)
+
+- **流式 JSON 行缓冲**：改进 JSON 流解析，使用 `lineBuffer` 防止 TCP 分包导致 JSON 对象被截断，进程结束时自动处理缓冲区残余数据
+
 ## [0.3.0] - 2026-01-22
 
 ### 新增 (Added)
