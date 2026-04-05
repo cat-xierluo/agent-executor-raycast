@@ -7,12 +7,13 @@ import {
   unlinkSync,
   writeFileSync,
   chmodSync,
+  readdirSync,
 } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 
 export interface AgentExecutorConfig {
-  projectDirs: string[];  // 扫描 .claude/commands/ 目录
-  skillsDirs: string[];   // 扫描 ~/.claude/skills/ 目录
+  projectDirs: string[]; // 扫描 .claude/commands/ 目录
+  skillsDirs: string[]; // 扫描 ~/.claude/skills/ 目录
   claudeBin: string;
   headlessMode: boolean;
   streamingMode: boolean;
@@ -35,11 +36,11 @@ export interface Preferences {
  */
 export function isValidSkillsDir(dir: string): boolean {
   if (!existsSync(dir)) return false;
-  
+
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
     // 检查是否有子目录包含 SKILL.md
-    return entries.some(entry => {
+    return entries.some((entry) => {
       if (entry.isDirectory()) {
         return existsSync(join(dir, entry.name, "SKILL.md"));
       }
@@ -51,11 +52,11 @@ export function isValidSkillsDir(dir: string): boolean {
 }
 
 /**
- * 验证目录是否是有效的项目目录（包含 .claude/commands/）
+ * 验证目录是否是有效的项目目录（包含 .claude/skills/）
  */
 export function isValidProjectDir(dir: string): boolean {
-  const commandsDir = join(dir, ".claude/commands");
-  return existsSync(commandsDir);
+  const skillsDir = join(dir, ".claude/skills");
+  return existsSync(skillsDir);
 }
 
 /**
@@ -100,7 +101,7 @@ export function loadConfig(): AgentExecutorConfig {
       `未找到有效的项目目录\n\n` +
         `请检查：\n` +
         `1. 至少配置一个有效的项目目录\n` +
-        `2. 目录必须包含 .claude/commands/ 子目录\n\n` +
+        `2. 目录必须包含 .claude/skills/ 子目录\n\n` +
         `已配置的目录：\n` +
         projectDirs.map((d) => `  - ${d}`).join("\n") +
         `\n\n提示：请在 Raycast 扩展设置中重新配置项目目录。`,
@@ -123,8 +124,11 @@ export function loadConfig(): AgentExecutorConfig {
   // 支持默认 ~/.claude/skills/ 目录
   const defaultSkillsDir = join(homedir(), ".claude/skills");
   const skillsDirs: string[] = [];
-  
-  if (prefs.enableDefaultSkills !== false && isValidSkillsDir(defaultSkillsDir)) {
+
+  if (
+    prefs.enableDefaultSkills !== false &&
+    isValidSkillsDir(defaultSkillsDir)
+  ) {
     skillsDirs.push(defaultSkillsDir);
   }
 
@@ -179,7 +183,7 @@ export interface ClaudeStreamingOptions {
   projectDir: string;
   claudeBin?: string;
   headlessMode?: boolean;
-  onChunk?: StreamingCallback;  // 流式输出回调
+  onChunk?: StreamingCallback; // 流式输出回调
 }
 
 /**
@@ -187,9 +191,16 @@ export interface ClaudeStreamingOptions {
  * 借鉴自 SkillLauncher 的实现
  */
 export async function executeClaudeStreaming(
-  options: ClaudeStreamingOptions
+  options: ClaudeStreamingOptions,
 ): Promise<ClaudeExecutionResult> {
-  const { projectDir, claudeBin: customClaudeBin, prompt, workDir, headlessMode = true, onChunk } = options;
+  const {
+    projectDir,
+    claudeBin: customClaudeBin,
+    prompt,
+    workDir,
+    headlessMode = true,
+    onChunk,
+  } = options;
   const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
   const startTime = Date.now();
 
@@ -208,59 +219,78 @@ export async function executeClaudeStreaming(
     let pid: number | undefined;
     let fullOutput = "";
     let sessionId: string | undefined;
+    let lineBuffer = ""; // 行缓冲，防止 JSON 在 TCP 分包时被截断
 
     // 使用 stream-json 格式获取流式输出
     const bashCommand = `cd "${projectDir}" && "${claudeBin}" -p "${prompt.replace(/"/g, '\\"')}" --output-format stream-json --verbose --include-partial-messages`;
 
-    const child = spawn('/bin/bash', ['-c', bashCommand], {
+    const child = spawn("/bin/bash", ["-c", bashCommand], {
       cwd: projectDir,
       env: { ...process.env },
       detached: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ["ignore", "pipe", "pipe"],
     });
 
     pid = child.pid;
 
-    // 处理 stdout（JSON 流）
-    child.stdout?.on('data', (data: Buffer) => {
-      const lines = data.toString().split('\n').filter(line => line.trim());
-      
-      for (const line of lines) {
-        try {
-          // 尝试解析 JSON 行
-          const parsed = JSON.parse(line);
-          
-          // 处理不同类型的消息
-          if (parsed.type === 'content' || parsed.type === 'message') {
-            const text = parsed.delta?.text || parsed.content?.text || parsed.text || "";
-            if (text) {
-              fullOutput += text;
-              onChunk?.(text, false);
-            }
-          }
-          
-          // 提取 session_id
-          if (parsed.session_id && !sessionId) {
-            sessionId = parsed.session_id;
-          }
-          
-          // 检查是否是最终消息
-          if (parsed.type === 'done' || parsed.stop_reason) {
-            onChunk?.(fullOutput, true);
-          }
-        } catch {
-          // 非 JSON 行，直接追加（可能是纯文本）
-          const text = line.trim();
-          if (text && !text.startsWith('{')) {
-            fullOutput += text + '\n';
-            onChunk?.(text + '\n', false);
+    // 处理完整的 JSON 行
+    function processLine(line: string) {
+      if (!line.trim()) return;
+
+      try {
+        const parsed = JSON.parse(line);
+
+        // 处理不同类型的消息
+        if (parsed.type === "content" || parsed.type === "message") {
+          const text =
+            parsed.delta?.text || parsed.content?.text || parsed.text || "";
+          if (text) {
+            fullOutput += text;
+            onChunk?.(text, false);
           }
         }
+
+        // 提取 session_id
+        if (parsed.session_id && !sessionId) {
+          sessionId = parsed.session_id;
+        }
+
+        // 检查是否是最终消息
+        if (parsed.type === "done" || parsed.stop_reason) {
+          onChunk?.(fullOutput, true);
+        }
+      } catch {
+        // 非 JSON 行，直接追加（可能是纯文本）
+        const text = line.trim();
+        if (text && !text.startsWith("{")) {
+          fullOutput += text + "\n";
+          onChunk?.(text + "\n", false);
+        }
+      }
+    }
+
+    // 处理 stdout（JSON 流），使用行缓冲防止截断
+    child.stdout?.on("data", (data: Buffer) => {
+      lineBuffer += data.toString();
+      const lines = lineBuffer.split("\n");
+      // 最后一个元素可能是不完整的行，保留在缓冲区
+      lineBuffer = lines.pop() || "";
+
+      for (const line of lines) {
+        processLine(line);
+      }
+    });
+
+    // 进程结束时处理缓冲区中剩余内容
+    child.stdout?.on("end", () => {
+      if (lineBuffer.trim()) {
+        processLine(lineBuffer);
+        lineBuffer = "";
       }
     });
 
     // 处理 stderr
-    child.stderr?.on('data', (data: Buffer) => {
+    child.stderr?.on("data", (data: Buffer) => {
       const text = data.toString();
       if (text) {
         fullOutput += text;
@@ -269,9 +299,9 @@ export async function executeClaudeStreaming(
     });
 
     // 处理进程结束
-    child.on('close', (code) => {
+    child.on("close", (code) => {
       const duration = Date.now() - startTime;
-      
+
       resolve({
         success: code === 0,
         output: fullOutput || "(无输出)",
@@ -283,7 +313,7 @@ export async function executeClaudeStreaming(
       });
     });
 
-    child.on('error', (error) => {
+    child.on("error", (error) => {
       const duration = Date.now() - startTime;
       resolve({
         success: false,
@@ -325,14 +355,18 @@ export async function executeClaudeCommand(
         const scriptPath = join(tmpdir(), `claude-visible-${Date.now()}.sh`);
         const sessionFile = join(tmpdir(), `claude-session-${Date.now()}.json`);
 
+        // 使用 base64 编码传递 prompt，避免 shell 注入
+        const promptB64 = Buffer.from(prompt).toString("base64");
+
         const scriptContent = `#!/bin/bash
 cd "${projectDir}"
+PROMPT=$(echo '${promptB64}' | base64 -d)
 echo "=== 执行 Claude Code 命令 ==="
-echo "命令: ${prompt}"
+echo "命令: $PROMPT"
 echo ""
 
 # 使用 JSON 输出格式以捕获 session ID
-"${claudeBin}" --print --dangerously-skip-permissions --output-format json "${prompt}" > "${sessionFile}"
+"${claudeBin}" --print --dangerously-skip-permissions --output-format json "$PROMPT" > "${sessionFile}"
 
 # 提取并显示结果和 session ID
 if [ -f "${sessionFile}" ]; then
@@ -346,7 +380,7 @@ if [ -f "${sessionFile}" ]; then
   echo "=== 执行完成 ==="
   echo "Session ID: $SESSION_ID"
   echo ""
-  echo "💡 恢复此对话: claude --resume $SESSION_ID"
+  echo "恢复此对话: claude --resume $SESSION_ID"
   echo "你可以查看上方输出，手动关闭此窗口。"
 
   # 清理临时文件

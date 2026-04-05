@@ -140,7 +140,9 @@ export async function getSelectedDevonThinkRecords(): Promise<
           path: finalPath,
           name: name || path.split("/").pop() || "",
           uuid,
-          type: type === "group" ? "directory" : "file",
+          type: (type === "group" ? "directory" : "file") as
+            | "file"
+            | "directory",
           referenceUrl: referenceUrl || undefined,
           hasFileSystemPath: hasPath === "true",
         };

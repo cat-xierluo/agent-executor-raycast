@@ -7,7 +7,7 @@ import { homedir } from "os";
  */
 export interface CommandMetadata {
   name: string;
-  type?: 'command' | 'skill'; // 区分命令或技能
+  type?: "command" | "skill"; // 区分命令或技能
   pinned?: boolean;
   isNew?: boolean;
   note?: string;
@@ -147,7 +147,8 @@ export function applyMetadataToSkills(skills: any[]): any[] {
 
   return skills.map((skill) => {
     // 优先查找 skill: 前缀的元数据，然后查找不带前缀的
-    const skillMetadata = metadata[`skill:${skill.name}`] || metadata[skill.name];
+    const skillMetadata =
+      metadata[`skill:${skill.name}`] || metadata[skill.name];
     return {
       ...skill,
       pinned: skillMetadata?.pinned || false,
@@ -164,7 +165,7 @@ export function toggleSkillPinned(skillName: string): boolean {
   const key = `skill:${skillName}`;
   const current = getCommandMetadata(key);
   const newPinnedState = !current?.pinned;
-  updateCommandMetadata(key, { pinned: newPinnedState, type: 'skill' });
+  updateCommandMetadata(key, { pinned: newPinnedState, type: "skill" });
   return newPinnedState;
 }
 
@@ -175,6 +176,6 @@ export function toggleSkillNew(skillName: string): boolean {
   const key = `skill:${skillName}`;
   const current = getCommandMetadata(key);
   const newNewState = !current?.isNew;
-  updateCommandMetadata(key, { isNew: newNewState, type: 'skill' });
+  updateCommandMetadata(key, { isNew: newNewState, type: "skill" });
   return newNewState;
 }

@@ -8,6 +8,7 @@ import {
   Toast,
   Detail,
   confirmAlert,
+  Alert,
 } from "@raycast/api";
 import { useState, useEffect } from "react";
 import {
@@ -61,7 +62,7 @@ export function GlobalStatsItem() {
         "确定要清空所有历史记录吗？\n\n这将删除所有已完成和失败的任务日志，但会保留正在运行的任务。此操作不可撤销。",
       primaryAction: {
         title: "清空",
-        style: Action.Style.Destructive,
+        style: Alert.ActionStyle.Destructive,
       },
     });
 
@@ -174,7 +175,7 @@ export function CommandStatsList() {
       message: "确定要清空该命令的统计数据吗？此操作不可恢复。",
       primaryAction: {
         title: "清空",
-        style: Action.Style.Destructive,
+        style: Alert.ActionStyle.Destructive,
       },
     });
 

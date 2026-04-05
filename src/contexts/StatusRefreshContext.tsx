@@ -42,7 +42,9 @@ export function useStatusRefresh() {
     const unsubscribe = statusRefreshManager.subscribe(() => {
       setVersion(statusRefreshManager.getVersion());
     });
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   return { refreshStatus: () => triggerStatusRefresh(), version };

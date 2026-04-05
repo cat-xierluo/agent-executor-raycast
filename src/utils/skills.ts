@@ -32,7 +32,9 @@ function isValidSkillDir(skillPath: string): boolean {
   const skillMdUpper = join(skillPath, "SKILL.md");
   const claudeDir = join(skillPath, ".claude");
 
-  return existsSync(skillMd) || existsSync(skillMdUpper) || existsSync(claudeDir);
+  return (
+    existsSync(skillMd) || existsSync(skillMdUpper) || existsSync(claudeDir)
+  );
 }
 
 /**
@@ -88,7 +90,10 @@ function scanSingleProjectSkills(projectDir: string): ClaudeSkill[] {
     try {
       content = readFileSync(skillFile, "utf-8");
     } catch (error) {
-      console.error(`[scanSkills] Failed to read skill file: ${skillFile}`, error);
+      console.error(
+        `[scanSkills] Failed to read skill file: ${skillFile}`,
+        error,
+      );
       continue;
     }
 

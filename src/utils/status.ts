@@ -225,6 +225,7 @@ export interface RunInfo {
   exitCode?: number;
   pid?: number;
   logPath: string;
+  workDir?: string;
 }
 
 /**
@@ -444,6 +445,7 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
     exitCode,
     pid,
     logPath: join(RUNS_DIR, `${runId}.log`),
+    workDir: directory,
   };
 }
 
