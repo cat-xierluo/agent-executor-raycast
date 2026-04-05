@@ -50,6 +50,7 @@ export interface LogEntry {
   exitCode?: number;
   pid?: number;
   output?: string;
+  outputFile?: string; // 临时输出文件路径，用于 PID 检测恢复
 }
 
 function ensureLogDirs() {
@@ -312,7 +313,7 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
     });
   }
 
-  logExecuting(prompt: string, pid?: number): void {
+  logExecuting(prompt: string, pid?: number, outputFile?: string): void {
     this.prompt = prompt; // 保存 prompt 供后续使用
     this.pid = pid; // 保存 PID
 
@@ -320,6 +321,7 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
     writeJsonLog("executing", "running", this.runId, {
       cmd: prompt.replace(/"/g, "'"),
       pid: pid,
+      output_file: outputFile, // 记录临时输出文件路径，用于后续恢复
     });
 
     // 如果日志流已启动但头部还未写入，现在写入头部（此时已有PID）
@@ -329,7 +331,7 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
     }
   }
 
-  logCompleted(output: string, exitCode: number): void {
+  logCompleted(output: string, exitCode: number, pid?: number, sessionId?: string): void {
     const duration = Date.now() - this.startTime;
 
     // 停止实时日志流（如果存在）
@@ -340,10 +342,14 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
     // 使用实时积累的输出内容,如果没有则使用传入的output
     const finalOutput = this.realtimeOutput || output;
 
+    // 使用传入的 pid 或已有的 pid
+    const finalPid = pid ?? this.pid;
+
     if (exitCode === 0) {
       writeJsonLog("completed", "success", this.runId, {
         duration: duration / 1000,
-        pid: this.pid,
+        pid: finalPid,
+        session_id: sessionId,
         target: this.targetPath,
         work_dir: this.workDir,
         cmd: this.prompt || "未知命令",
@@ -354,7 +360,8 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
       writeJsonLog("failed", "error", this.runId, {
         duration: duration / 1000,
         exit_code: exitCode,
-        pid: this.pid,
+        pid: finalPid,
+        session_id: sessionId,
         target: this.targetPath,
         work_dir: this.workDir,
         cmd: this.prompt || "未知命令",
