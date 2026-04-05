@@ -306,7 +306,7 @@ export default function CommandList() {
       const logger = new RunLogger(actualFilePath || skill.name, projectDir);
 
       logger.logValidated();
-      logger.startRealtimeLogging();
+      // 注意: startRealtimeLogging() 在 executeClaudeStreaming/executeClaudeCommand 内部调用
 
       // 构建 prompt
       let prompt = `/${skill.name}`;
@@ -331,6 +331,7 @@ export default function CommandList() {
           projectDir,
           claudeBin: config.claudeBin,
           headlessMode: config.headlessMode,
+          logger,
           onChunk: (chunk, isFinal) => {
             fullOutput += chunk;
             setStreamingOutput((prev) => prev + chunk);
@@ -338,7 +339,7 @@ export default function CommandList() {
           },
         });
 
-        logger.logCompleted(fullOutput, result.exitCode);
+        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId);
       } else {
         result = await executeClaudeCommand(
           {

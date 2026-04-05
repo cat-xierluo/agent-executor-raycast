@@ -8,7 +8,7 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 type ExtensionPreferences = {
-  /** 项目目录 - Agent Executor 插件根目录（必填） */
+  /** 项目目录 - 包含 .claude/skills/ 的项目目录（必填） */
   "projectDir1": string,
   /** 项目目录 2 - 第二个项目目录（可选） */
   "projectDir2"?: string,
@@ -21,7 +21,11 @@ type ExtensionPreferences = {
   /** Claude CLI 可执行文件路径 - 可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude） */
   "claudeBin": string,
   /** 后台运行模式 - 启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。 */
-  "headlessMode": boolean
+  "headlessMode": boolean,
+  /** 启用默认 Skills 目录 - 自动扫描 ~/.claude/skills/ 目录中的 Skills */
+  "enableDefaultSkills": boolean,
+  /** 流式输出模式 - 实时显示 Claude 的输出（类似 SkillLauncher） */
+  "streamingMode": boolean
 }
 
 /** Preferences accessible in all the extension's commands */
