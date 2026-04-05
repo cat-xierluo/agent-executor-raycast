@@ -1,4 +1,4 @@
-import { Detail, Color } from "@raycast/api";
+import { Detail } from "@raycast/api";
 
 export interface StreamingOutputProps {
   output: string;

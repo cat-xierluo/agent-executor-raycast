@@ -13,8 +13,8 @@ import { useState, useEffect } from "react";
 import {
   getAllRunStatus,
   RunInfo,
-  countRunningCommands,
   clearAllHistory,
+  isProcessAlive,
 } from "./utils/status";
 import { readFileSync, existsSync, appendFileSync } from "fs";
 import { execSync } from "child_process";
@@ -23,22 +23,6 @@ import { JSONL_LOG, LOG_DIR, formatLocalTime } from "./utils/logger";
 import { GlobalStatsItem } from "./components/StatsComponents";
 import { useStatusRefresh } from "./contexts/StatusRefreshContext";
 
-/**
- * 检查指定 PID 的进程是否真实存活
- */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    const errno = (error as any).errno;
-    if (errno === "ESRCH" || errno === "EPERM") {
-      return false;
-    }
-    return false;
-  }
-}
-
 export default function StatusList() {
   const [runs, setRuns] = useState<{
     running: RunInfo[];
@@ -46,26 +30,32 @@ export default function StatusList() {
     failed: RunInfo[];
   }>({ running: [], completed: [], failed: [] });
   const [isLoading, setIsLoading] = useState(true);
-  const [runningCount, setRunningCount] = useState(0);
-  const [selectedRun, setSelectedRun] = useState<RunInfo | null>(null);
+  const [tick, setTick] = useState(0); // 用于触发运行中任务的时长更新
   const { version } = useStatusRefresh();
 
   useEffect(() => {
     loadStatus();
 
-    // 每 5 秒刷新一次状态（特别是为了更新运行中的命令）
+    // 每 5 秒刷新一次状态
     const interval = setInterval(() => {
       loadStatus();
     }, 5000);
 
-    return () => clearInterval(interval);
+    // 每 1 秒更新一次运行中任务的已用时长显示
+    const tickInterval = setInterval(() => {
+      setTick((t) => t + 1);
+    }, 1000);
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(tickInterval);
+    };
   }, [version]);
 
   async function loadStatus() {
     try {
       const status = getAllRunStatus(7);
       setRuns(status);
-      setRunningCount(countRunningCommands());
     } catch (error) {
       await showToast({
         style: Toast.Style.Failure,
@@ -105,8 +95,14 @@ export default function StatusList() {
     }
   }
 
+  // 计算运行中任务的已用时长（每秒刷新）
+  function getElapsedDuration(startTime: Date): string {
+    const elapsed = (Date.now() - startTime.getTime()) / 1000;
+    return formatDuration(elapsed);
+  }
+
   function formatDuration(seconds?: number): string {
-    if (!seconds) return "";
+    if (!seconds && seconds !== 0) return "";
     if (seconds < 60) {
       return `${Math.round(seconds)}秒`;
     } else {
@@ -116,52 +112,52 @@ export default function StatusList() {
     }
   }
 
-  // 统一的渲染函数，根据状态显示不同的图标和样式
+  // 渲染运行项
   function renderRunItem(run: RunInfo) {
-    // 根据状态确定图标和标题
     let icon: Icon;
-    let title: string;
     let statusText: string;
     let statusIcon: Icon;
 
     switch (run.status) {
       case "running":
         icon = Icon.CircleProgress;
-        title = run.commandName;
         statusText = "运行中";
         statusIcon = Icon.Globe;
         break;
       case "completed":
         icon = Icon.CheckCircle;
-        title = run.commandName;
         statusText = "成功";
         statusIcon = Icon.Check;
         break;
       case "failed":
         icon = Icon.XMarkCircle;
-        title = run.commandName;
         statusText = "失败";
         statusIcon = Icon.ExclamationMark;
         break;
     }
 
-    // 构建辅助信息
+    // 运行中任务显示实时已用时长
+    const durationText =
+      run.status === "running"
+        ? getElapsedDuration(run.startTime)
+        : run.duration
+          ? formatDuration(run.duration)
+          : undefined;
+
     const accessories = [
       { text: formatDateTime(run.endTime || run.startTime), icon: Icon.Clock },
-      run.duration
-        ? { text: formatDuration(run.duration), icon: Icon.Hourglass }
-        : null,
+      durationText ? { text: durationText, icon: Icon.Hourglass } : null,
       { text: statusText, icon: statusIcon },
       run.status === "failed" && run.exitCode !== undefined
         ? { text: `退出码: ${run.exitCode}`, icon: Icon.Text }
         : null,
-    ].filter(Boolean);
+    ].filter(Boolean) as { text: string; icon: Icon }[];
 
     return (
       <ListItem
         key={run.runId}
         id={run.runId}
-        title={title}
+        title={run.commandName}
         subtitle={run.targetFile}
         icon={icon}
         accessories={accessories}
@@ -228,7 +224,6 @@ export default function StatusList() {
                     }
 
                     try {
-                      // 写入失败事件到 JSONL 日志
                       const failedEvent = {
                         ts: formatLocalTime(new Date()),
                         event: "failed",
@@ -284,18 +279,6 @@ export default function StatusList() {
     );
   }
 
-  // 合并所有运行记录并按时间倒序排序（最新的在前）
-  const allRuns = [...runs.running, ...runs.completed, ...runs.failed].sort(
-    (a, b) => b.startTime.getTime() - a.startTime.getTime(),
-  );
-
-  const totalItems = allRuns.length;
-
-  // 如果选中了某个 run，显示详情
-  if (selectedRun) {
-    return <LogDetail run={selectedRun} />;
-  }
-
   async function handleClearAllHistory() {
     const confirmed = await confirmAlert({
       title: "清空所有历史记录",
@@ -326,6 +309,8 @@ export default function StatusList() {
     }
   }
 
+  const totalCount = runs.running.length + runs.completed.length + runs.failed.length;
+
   return (
     <List
       isLoading={isLoading}
@@ -338,7 +323,7 @@ export default function StatusList() {
             icon={Icon.ArrowClockwise}
             shortcut={{ modifiers: ["cmd"], key: "r" }}
           />
-          {totalItems > 0 && (
+          {totalCount > 0 && (
             <Action
               title="清空所有历史"
               onAction={handleClearAllHistory}
@@ -354,18 +339,37 @@ export default function StatusList() {
         <GlobalStatsItem />
       </List.Section>
 
-      {/* 运行历史区域 */}
-      <List.Section title={`📝 运行历史 (${totalItems})`}>
-        {totalItems === 0 ? (
+      {/* 运行中 */}
+      {runs.running.length > 0 && (
+        <List.Section title={`🔄 运行中 (${runs.running.length})`}>
+          {runs.running.map(renderRunItem)}
+        </List.Section>
+      )}
+
+      {/* 已完成 */}
+      {runs.completed.length > 0 && (
+        <List.Section title={`✅ 已完成 (${runs.completed.length})`}>
+          {runs.completed.map(renderRunItem)}
+        </List.Section>
+      )}
+
+      {/* 失败 */}
+      {runs.failed.length > 0 && (
+        <List.Section title={`❌ 失败 (${runs.failed.length})`}>
+          {runs.failed.map(renderRunItem)}
+        </List.Section>
+      )}
+
+      {/* 无记录 */}
+      {totalCount === 0 && (
+        <List.Section title="📝 运行历史">
           <List.Item
             icon={Icon.List}
             title="暂无运行记录"
             subtitle="执行命令后，这里会显示运行历史和状态"
           />
-        ) : (
-          allRuns.map(renderRunItem)
-        )}
-      </List.Section>
+        </List.Section>
+      )}
     </List>
   );
 }
@@ -408,7 +412,6 @@ export function LogDetail({ run }: LogDetailProps) {
 
   async function loadLogContent() {
     try {
-      // 从 JSONL 日志中读取内容
       const jsonlPath = join(LOG_DIR, "raycast-extension.jsonl");
 
       if (!existsSync(jsonlPath)) {
@@ -420,16 +423,18 @@ export function LogDetail({ run }: LogDetailProps) {
       const jsonlContent = readFileSync(jsonlPath, "utf-8");
       const lines = jsonlContent.trim().split("\n");
 
-      // 查找该 runId 的所有事件
-      const runEntries = lines
-        .map((line) => {
-          try {
-            return JSON.parse(line);
-          } catch {
-            return null;
+      // 只解析属于该 runId 的条目（跳过不相关的行）
+      const runEntries: any[] = [];
+      for (const line of lines) {
+        try {
+          const parsed = JSON.parse(line);
+          if (parsed.run_id === run.runId) {
+            runEntries.push(parsed);
           }
-        })
-        .filter((entry) => entry && entry.run_id === run.runId);
+        } catch {
+          // 跳过无法解析的行
+        }
+      }
 
       if (runEntries.length === 0) {
         setLogContent("未找到该任务的日志记录");
@@ -479,7 +484,7 @@ export function LogDetail({ run }: LogDetailProps) {
         const realtimeOutputs = runEntries
           .filter((e) => e.event === "realtime_output")
           .map((e) => e.output)
-          .filter((o) => o);
+          .filter((o: string) => o);
         if (realtimeOutputs.length > 0) {
           output = realtimeOutputs.join("");
         }
@@ -511,18 +516,10 @@ export function LogDetail({ run }: LogDetailProps) {
 
       const content = logLines.join("\n");
       setLogContent(content);
-
-      // 如果已经有内容了，就不再显示 loading
-      if (content.length > 0) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     } catch (error) {
       setLogContent(error instanceof Error ? error.message : "读取日志失败");
-    } finally {
-      // 只在第一次加载时设置 isLoading 为 false
-      if (logContent === "") {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   }
 
@@ -555,7 +552,6 @@ export function LogDetail({ run }: LogDetailProps) {
         title: "命令已终止",
         message: `进程 ${run.pid} 已被终止`,
       });
-      // 刷新日志内容以查看最终状态
       setTimeout(() => loadLogContent(), 500);
     } catch (error) {
       await showToast({
@@ -580,7 +576,6 @@ export function LogDetail({ run }: LogDetailProps) {
     }
 
     try {
-      // 写入失败事件到 JSONL 日志
       const failedEvent = {
         ts: formatLocalTime(new Date()),
         event: "failed",
@@ -597,7 +592,6 @@ export function LogDetail({ run }: LogDetailProps) {
         title: "已标记为失败",
         message: "任务已被强制标记为失败状态",
       });
-      // 刷新日志内容以查看最终状态
       setTimeout(() => loadLogContent(), 500);
     } catch (error) {
       await showToast({
@@ -607,40 +601,6 @@ export function LogDetail({ run }: LogDetailProps) {
       });
     }
   }
-
-  // 格式化时间 - 包含日期
-  const formatTime = (date: Date) => {
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-
-    // 今天：显示相对时间
-    if (diffDays === 0) {
-      if (diffMins < 1) return "刚刚";
-      if (diffMins < 60) return `${diffMins}分钟前`;
-      if (diffHours < 24) return `${diffHours}小时前`;
-    }
-
-    // 昨天或更早：显示完整日期时间
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    const hours = String(date.getHours()).padStart(2, "0");
-    const minutes = String(date.getMinutes()).padStart(2, "0");
-
-    if (diffDays === 1) {
-      return `昨天 ${hours}:${minutes}`;
-    }
-
-    return `${month}-${day} ${hours}:${minutes}`;
-  };
-
-  // 计算日志统计信息
-  const logStats = {
-    totalLines: logContent.split("\n").length,
-    totalChars: logContent.length,
-  };
 
   // 状态文本和图标
   const statusText =
@@ -652,6 +612,11 @@ export function LogDetail({ run }: LogDetailProps) {
         ? "✅ 成功"
         : "❌ 失败";
   const durationText = run.duration ? formatDuration(run.duration) : "进行中";
+
+  const logStats = {
+    totalLines: logContent.split("\n").length,
+    totalChars: logContent.length,
+  };
 
   return (
     <Detail
@@ -791,6 +756,31 @@ export function LogDetail({ run }: LogDetailProps) {
       }
     />
   );
+}
+
+function formatTime(date: Date) {
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffDays === 0) {
+    if (diffMins < 1) return "刚刚";
+    if (diffMins < 60) return `${diffMins}分钟前`;
+    if (diffHours < 24) return `${diffHours}小时前`;
+  }
+
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  if (diffDays === 1) {
+    return `昨天 ${hours}:${minutes}`;
+  }
+
+  return `${month}-${day} ${hours}:${minutes}`;
 }
 
 function formatDuration(seconds: number): string {
