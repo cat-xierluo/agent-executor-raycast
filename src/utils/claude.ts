@@ -184,6 +184,12 @@ export interface ClaudeStreamingOptions {
   claudeBin?: string;
   headlessMode?: boolean;
   onChunk?: StreamingCallback; // 流式输出回调
+  logger?: {
+    startRealtimeLogging: () => void;
+    logRealtime: (chunk: string) => void;
+    logExecuting?: (prompt: string, pid?: number) => void;
+    logCompleted: (output: string, exitCode: number, pid?: number, sessionId?: string) => void;
+  };
 }
 
 /**
@@ -200,6 +206,7 @@ export async function executeClaudeStreaming(
     workDir,
     headlessMode = true,
     onChunk,
+    logger,
   } = options;
   const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
   const startTime = Date.now();
@@ -214,6 +221,9 @@ export async function executeClaudeStreaming(
       duration: 0,
     };
   }
+
+  // 启动实时日志流
+  logger?.startRealtimeLogging();
 
   return new Promise((resolve) => {
     let pid: number | undefined;
@@ -233,6 +243,9 @@ export async function executeClaudeStreaming(
 
     pid = child.pid;
 
+    // 记录执行信息（含 PID）
+    logger?.logExecuting?.(prompt, pid);
+
     // 处理完整的 JSON 行
     function processLine(line: string) {
       if (!line.trim()) return;
@@ -246,6 +259,7 @@ export async function executeClaudeStreaming(
             parsed.delta?.text || parsed.content?.text || parsed.text || "";
           if (text) {
             fullOutput += text;
+            logger?.logRealtime(text);
             onChunk?.(text, false);
           }
         }
@@ -264,6 +278,7 @@ export async function executeClaudeStreaming(
         const text = line.trim();
         if (text && !text.startsWith("{")) {
           fullOutput += text + "\n";
+          logger?.logRealtime(text + "\n");
           onChunk?.(text + "\n", false);
         }
       }
@@ -294,6 +309,7 @@ export async function executeClaudeStreaming(
       const text = data.toString();
       if (text) {
         fullOutput += text;
+        logger?.logRealtime(text);
         onChunk?.(text, false);
       }
     });
@@ -333,7 +349,7 @@ export async function executeClaudeCommand(
   logger?: {
     startRealtimeLogging: () => void;
     logRealtime: (chunk: string) => void;
-    logExecuting?: (prompt: string, pid?: number) => void;
+    logExecuting?: (prompt: string, pid?: number, outputFile?: string) => void;
   },
 ): Promise<ClaudeExecutionResult> {
   const {
@@ -468,13 +484,14 @@ end tell`;
 
       pid = child.pid;
 
-      // 立即记录执行开始事件（在进程启动后）
+      // 立即记录执行开始事件（含临时输出文件路径，用于 PID 检测恢复）
       if (logger && logger.logExecuting) {
-        logger.logExecuting(prompt, pid);
+        logger.logExecuting(prompt, pid, tempOutputFile);
       }
 
       // 监听进程结束
       child.on("close", (code) => {
+        clearTimeout(timeout);
         const duration = Date.now() - startTime;
         let output = "";
         let sessionId: string | undefined;
@@ -525,6 +542,7 @@ end tell`;
       });
 
       child.on("error", (error) => {
+        clearTimeout(timeout);
         const duration = Date.now() - startTime;
 
         // 清理临时文件
@@ -543,7 +561,7 @@ end tell`;
       });
 
       // 5 分钟后超时
-      setTimeout(() => {
+      const timeout = setTimeout(() => {
         // 检查子进程是否仍在运行
         try {
           process.kill(pid!, 0); // 发送信号 0 检查进程是否存在

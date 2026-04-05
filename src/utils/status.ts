@@ -8,7 +8,7 @@ import {
 } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
-import { LogEntry, JSONL_LOG, RUNS_DIR, INDEX_FILE, ERROR_LOG } from "./logger";
+import { LogEntry, JSONL_LOG, RUNS_DIR, INDEX_FILE, ERROR_LOG, writeJsonLog } from "./logger";
 
 /**
  * 检查指定 PID 的进程是否真实存活
@@ -16,14 +16,13 @@ import { LogEntry, JSONL_LOG, RUNS_DIR, INDEX_FILE, ERROR_LOG } from "./logger";
  * @param pid 进程 ID
  * @returns 进程是否存活
  */
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   try {
     // 发送信号 0 不会终止进程，但可以检查进程是否存在
     process.kill(pid, 0);
 
     // 进程存在，但需要检查是否是僵尸进程
     // 通过 execSync 调用 ps 命令来检查进程状态
-    const { execSync } = require("child_process");
     try {
       const psOutput = execSync(`ps -p ${pid} -o state=`, {
         encoding: "utf-8",
@@ -266,6 +265,7 @@ export function readLogEntries(): LogEntry[] {
             exitCode: parsed.exit_code,
             pid: parsed.pid,
             output: parsed.output,
+            outputFile: parsed.output_file, // 临时输出文件路径
           };
         } catch (error) {
           // 跳过无法解析的行
@@ -385,33 +385,91 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
 
       if (processInfo.status === "completed") {
         status = "completed";
-        endTime = new Date(); // 使用当前时间作为结束时间
-        duration = (endTime.getTime() - startTime.getTime()) / 1000; // 转换为秒
         console.log(
-          `[extractRunInfo] 检测到PID ${pid} 已完成，基于输出内容判定状态`,
+          `[extractRunInfo] 检测到PID ${pid} 已完成，尝试从临时文件恢复输出`,
         );
 
+        // 尝试从临时输出文件恢复实际输出和完成时间
+        let actualOutput = "(通过PID检测判定完成)";
+        let actualDuration: number | undefined;
+
+        const tempOutputPath = executingEvent?.outputFile;
+        if (tempOutputPath && existsSync(tempOutputPath)) {
+          try {
+            const rawOutput = readFileSync(tempOutputPath, "utf-8");
+            // 尝试解析 JSON 输出
+            try {
+              const jsonOutput = JSON.parse(rawOutput);
+              actualOutput = jsonOutput.result || rawOutput.substring(0, 10000);
+            } catch {
+              actualOutput = rawOutput.substring(0, 10000);
+            }
+            // 使用临时文件的修改时间作为实际完成时间
+            const fileStat = statSync(tempOutputPath);
+            endTime = fileStat.mtime;
+            actualDuration = (endTime.getTime() - startTime.getTime()) / 1000;
+
+            // 清理临时文件
+            try { unlinkSync(tempOutputPath); } catch {}
+            console.log(
+              `[extractRunInfo] 从临时文件恢复输出成功，实际耗时: ${actualDuration?.toFixed(1)}s`,
+            );
+          } catch (e) {
+            console.error(`[extractRunInfo] 读取临时文件失败:`, e);
+          }
+        }
+
+        if (!endTime) {
+          endTime = new Date();
+        }
+        duration = actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
+
         // 写入completed事件到JSONL,避免下次再计算
-        const { writeJsonLog } = require("./logger");
         writeJsonLog("completed", "success", runId, {
           duration: duration,
           pid: pid,
           target: targetFullPath,
           work_dir: targetDirectory,
           cmd: command,
-          output: "(通过PID检测判定完成)",
+          output: actualOutput,
         });
       } else if (processInfo.status === "failed") {
         status = "failed";
-        endTime = new Date();
-        duration = (endTime.getTime() - startTime.getTime()) / 1000; // 转换为秒
         exitCode = -2; // 表示基于检测判定为失败
         console.log(
-          `[extractRunInfo] 检测到PID ${pid} 已失败，基于进程状态判定`,
+          `[extractRunInfo] 检测到PID ${pid} 已失败，尝试从临时文件恢复输出`,
         );
 
+        // 尝试从临时输出文件恢复实际输出和完成时间
+        let actualOutput = "(通过PID检测判定失败)";
+        let actualDuration: number | undefined;
+
+        const tempOutputPath = executingEvent?.outputFile;
+        if (tempOutputPath && existsSync(tempOutputPath)) {
+          try {
+            const rawOutput = readFileSync(tempOutputPath, "utf-8");
+            actualOutput = rawOutput.substring(0, 10000);
+            // 使用临时文件的修改时间作为实际完成时间
+            const fileStat = statSync(tempOutputPath);
+            endTime = fileStat.mtime;
+            actualDuration = (endTime.getTime() - startTime.getTime()) / 1000;
+
+            // 清理临时文件
+            try { unlinkSync(tempOutputPath); } catch {}
+            console.log(
+              `[extractRunInfo] 从临时文件恢复失败输出成功，实际耗时: ${actualDuration?.toFixed(1)}s`,
+            );
+          } catch (e) {
+            console.error(`[extractRunInfo] 读取临时文件失败:`, e);
+          }
+        }
+
+        if (!endTime) {
+          endTime = new Date();
+        }
+        duration = actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
+
         // 写入failed事件到JSONL,避免下次再计算
-        const { writeJsonLog } = require("./logger");
         writeJsonLog("failed", "error", runId, {
           duration: duration,
           exit_code: exitCode,
@@ -419,7 +477,7 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
           target: targetFullPath,
           work_dir: targetDirectory,
           cmd: command,
-          output: "(通过PID检测判定失败)",
+          output: actualOutput,
           reason: "pid_detection",
         });
       } else {
