@@ -196,6 +196,23 @@ export interface ClaudeStreamingOptions {
  * 使用流式输出执行 Claude 命令
  * 借鉴自 SkillLauncher 的实现
  */
+/**
+ * 从项目的 .claude/settings.json 读取 env 字段作为环境变量
+ */
+function getProjectEnv(projectDir: string): Record<string, string> {
+  try {
+    const settingsPath = join(projectDir, ".claude/settings.json");
+    if (existsSync(settingsPath)) {
+      const content = readFileSync(settingsPath, "utf-8");
+      const settings = JSON.parse(content);
+      return settings.env || {};
+    }
+  } catch {
+    // 忽略读取失败
+  }
+  return {};
+}
+
 export async function executeClaudeStreaming(
   options: ClaudeStreamingOptions,
 ): Promise<ClaudeExecutionResult> {
@@ -210,6 +227,9 @@ export async function executeClaudeStreaming(
   } = options;
   const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
   const startTime = Date.now();
+
+  // 读取项目的 settings.json 环境变量
+  const projectEnv = getProjectEnv(projectDir);
 
   // 流式模式只能在 headless 模式下使用
   if (!headlessMode) {
@@ -236,7 +256,7 @@ export async function executeClaudeStreaming(
 
     const child = spawn("/bin/bash", ["-c", bashCommand], {
       cwd: projectDir,
-      env: { ...process.env },
+      env: { ...process.env, ...projectEnv },
       detached: false,
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -363,6 +383,9 @@ export async function executeClaudeCommand(
 
   const startTime = Date.now();
 
+  // 读取项目的 settings.json 环境变量
+  const projectEnv = getProjectEnv(projectDir);
+
   // 如果不是无头模式，在新的 Terminal 窗口中运行 Claude Code
   if (!headlessMode) {
     return new Promise((resolve) => {
@@ -477,7 +500,7 @@ end tell`;
 
       const child = spawn("/bin/bash", ["-c", bashCommand], {
         cwd: projectDir,
-        env: { ...process.env },
+        env: { ...process.env, ...projectEnv },
         detached: false,
         stdio: "ignore", // 不使用父进程的 stdio
       });
