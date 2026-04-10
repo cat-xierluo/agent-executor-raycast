@@ -275,7 +275,7 @@ commands.forEach(cmd => {
 
 1. **检查日志文件**: 查看 `logs/errors.log` 获取详细错误信息
 2. **查看 CHANGELOG.md**: 了解最近的变更和已知问题
-3. **查看 ROADMAP.md**: 了解当前的开发进度和计划
+3. **查看 ROADMAP.md**: 了解当前的开发进度和计划（见 docs/ 目录）
 4. **提交 Issue**: 在项目仓库提交详细的错误报告
 
 ### 提交 Issue 时请包含：
@@ -300,7 +300,7 @@ commands.forEach(cmd => {
 
 ## 📚 相关文档
 
-- [README.md](README.md) - 项目概述和快速开始
-- [CHANGELOG.md](CHANGELOG.md) - 变更历史
+- [README.md](../README.md) - 项目概述和快速开始
+- [CHANGELOG.md](../CHANGELOG.md) - 变更历史
 - [ROADMAP.md](ROADMAP.md) - 开发路线图
-- [docs/DEVONTHINK_INTEGRATION.md](docs/DEVONTHINK_INTEGRATION.md) - DevonThink 集成文档
+- [DEVONTHINK_INTEGRATION.md](DEVONTHINK_INTEGRATION.md) - DevonThink 集成文档

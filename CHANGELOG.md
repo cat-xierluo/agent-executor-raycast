@@ -2,6 +2,15 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [0.5.1] - 2026-04-09
+
+### 修复 (Fixed)
+
+- **SessionEnd hook 失败**：修复 `notify.cjs` 因 `/usr/bin/env node` 找不到 node 而执行失败的问题
+  - MyAgents 环境下 node 不在系统默认 PATH 中，改用 `node` 直接调用即可
+  - 修复前：hook 失败导致 agent-executor 无法收到任务完成通知，需等待超时（~400秒）
+  - 修复后：SessionEnd hook 正常触发，任务完成信号及时传递
+
 ## [0.5.0] - 2026-04-05
 
 ### 变更 (Changed)
