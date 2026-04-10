@@ -334,9 +334,33 @@ export async function executeClaudeStreaming(
       }
     });
 
+    // 清理函数：终止 Claude CLI 守护进程
+    function cleanupProcess() {
+      if (pid) {
+        try {
+          // 首先尝试正常终止进程
+          process.kill(pid, "SIGTERM");
+        } catch {
+          // 进程可能已经结束，忽略错误
+        }
+
+        // 延迟后强制终止（如果还没退出）
+        setTimeout(() => {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {
+            // 进程已结束，忽略错误
+          }
+        }, 1000);
+      }
+    }
+
     // 处理进程结束
     child.on("close", (code) => {
       const duration = Date.now() - startTime;
+
+      // 清理守护进程
+      cleanupProcess();
 
       resolve({
         success: code === 0,
@@ -351,6 +375,10 @@ export async function executeClaudeStreaming(
 
     child.on("error", (error) => {
       const duration = Date.now() - startTime;
+
+      // 清理守护进程
+      cleanupProcess();
+
       resolve({
         success: false,
         output: error.message,
@@ -512,6 +540,27 @@ end tell`;
         logger.logExecuting(prompt, pid, tempOutputFile);
       }
 
+      // 清理函数：终止 Claude CLI 守护进程
+      function cleanupProcess() {
+        if (pid) {
+          try {
+            // 首先尝试正常终止进程
+            process.kill(pid, "SIGTERM");
+          } catch {
+            // 进程可能已经结束，忽略错误
+          }
+
+          // 延迟后强制终止（如果还没退出）
+          setTimeout(() => {
+            try {
+              process.kill(pid, "SIGKILL");
+            } catch {
+              // 进程已结束，忽略错误
+            }
+          }, 1000);
+        }
+      }
+
       // 监听进程结束
       child.on("close", (code) => {
         clearTimeout(timeout);
@@ -553,6 +602,9 @@ end tell`;
           // 清理失败不影响结果
         }
 
+        // 清理守护进程
+        cleanupProcess();
+
         resolve({
           success: exitCode === 0,
           output: output || "(无输出)",
@@ -572,6 +624,9 @@ end tell`;
         try {
           if (existsSync(tempOutputFile)) unlinkSync(tempOutputFile);
         } catch {}
+
+        // 清理守护进程
+        cleanupProcess();
 
         resolve({
           success: false,

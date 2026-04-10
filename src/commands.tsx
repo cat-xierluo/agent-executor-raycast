@@ -216,6 +216,195 @@ export default function CommandList() {
   }
 
   /**
+   * 执行自由指令（直接输入prompt，不走skill）
+   */
+  async function executeFreeCommand() {
+    if (processingCommand) return;
+
+    const validFiles = selectedFiles.filter(
+      (file) => file && file.trim().length > 0,
+    );
+    const executionFile =
+      activeFile && activeFile.trim().length > 0 ? activeFile : validFiles[0];
+
+    if (!executionFile) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "未选择文件",
+        message: "请在 Finder 或 DEVONthink 中选择文件后重试",
+      });
+      return;
+    }
+
+    const userPrompt = note.trim();
+    if (!userPrompt) {
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "未输入指令",
+        message: "请在搜索框中输入你的要求",
+      });
+      return;
+    }
+
+    setProcessingCommand("free-command");
+
+    // DEVONthink 文件导出
+    let actualFilePath = executionFile;
+    const record = executionFile
+      ? devonThinkRecords.get(executionFile)
+      : undefined;
+
+    if (
+      record &&
+      executionFile &&
+      (isDevonThinkURL(executionFile) || isFilesNoIndexPath(executionFile))
+    ) {
+      const exportToast = await showToast({
+        style: Toast.Style.Animated,
+        title: "正在导出文件",
+        message: "从 DEVONthink 导出文件到临时目录...",
+      });
+
+      try {
+        const prepared = await prepareFilePathForCommand(record);
+        actualFilePath = prepared.path;
+        if (prepared.isTemp) {
+          await exportToast.hide();
+          await showToast({
+            style: Toast.Style.Success,
+            title: "文件已导出",
+            message: `临时路径: ${actualFilePath}`,
+          });
+        }
+      } catch (error) {
+        await exportToast.hide();
+        await showToast({
+          style: Toast.Style.Failure,
+          title: "导出文件失败",
+          message: error instanceof Error ? error.message : "未知错误",
+        });
+        setProcessingCommand(null);
+        return;
+      }
+    }
+
+    const toast = await showToast({
+      style: Toast.Style.Animated,
+      title: "正在执行自由指令",
+      message: actualFilePath.split("/").pop() || "",
+    });
+
+    const executionStartTime = Date.now();
+    const config = getConfig();
+
+    try {
+      const projectDir = config.projectDirs[0];
+      const logger = new RunLogger(actualFilePath, projectDir);
+
+      logger.logValidated();
+
+      // 构建 prompt: 直接使用用户输入，不加 /skillname 前缀
+      const prompt = `${userPrompt} "${actualFilePath}"`;
+
+      let result;
+
+      if (config.streamingMode && config.headlessMode) {
+        let fullOutput = "";
+        setStreamingOutput(`› ${prompt}\n\n`);
+        setIsStreaming(true);
+        setStreamingCommand("自由指令");
+
+        result = await executeClaudeStreaming({
+          prompt,
+          workDir: projectDir,
+          projectDir,
+          claudeBin: config.claudeBin,
+          headlessMode: config.headlessMode,
+          logger,
+          onChunk: (chunk, isFinal) => {
+            fullOutput += chunk;
+            setStreamingOutput((prev) => prev + chunk);
+            if (isFinal) setIsStreaming(false);
+          },
+        });
+
+        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId);
+      } else {
+        result = await executeClaudeCommand(
+          {
+            prompt,
+            workDir: projectDir,
+            projectDir,
+            claudeBin: config.claudeBin,
+            headlessMode: config.headlessMode,
+          },
+          logger,
+        );
+
+        logger.logCompleted(result.output, result.exitCode);
+      }
+
+      const executionDuration = Date.now() - executionStartTime;
+      recordExecution("free-command", result.success, executionDuration);
+
+      if (result.success) {
+        if (config.streamingMode && config.headlessMode) {
+          setStreamingOutput(
+            (prev) =>
+              prev +
+              `\n\n✅ 命令执行完成 (${Math.round(result.duration / 1000)}s)\n`,
+          );
+        } else {
+          await toast.hide();
+          if (config.headlessMode) {
+            await showHUD(
+              `✅ 自由指令完成 (${Math.round(result.duration / 1000)}s)`,
+            );
+          } else {
+            await showHUD(`🖥️ 自由指令已在 Terminal 窗口中执行`);
+          }
+          await closeMainWindow();
+        }
+      } else {
+        if (config.streamingMode && config.headlessMode) {
+          setStreamingOutput(
+            (prev) => prev + `\n\n❌ 执行失败 (退出码: ${result.exitCode})\n`,
+          );
+        } else {
+          toast.style = Toast.Style.Failure;
+          toast.title = "执行失败";
+          toast.message = `退出码: ${result.exitCode}`;
+        }
+      }
+    } catch (error) {
+      console.error(`[executeFreeCommand] Error:`, error);
+
+      if (config.streamingMode && config.headlessMode) {
+        setStreamingOutput(
+          (prev) =>
+            prev +
+            `\n\n❌ 错误: ${error instanceof Error ? error.message : "未知错误"}\n`,
+        );
+        setIsStreaming(false);
+      } else {
+        toast.style = Toast.Style.Failure;
+        toast.title = "执行失败";
+        toast.message = error instanceof Error ? error.message : "未知错误";
+      }
+
+      const executionDuration = Date.now() - executionStartTime;
+      recordExecution("free-command", false, executionDuration);
+    } finally {
+      setProcessingCommand(null);
+      if (config.streamingMode && config.headlessMode) {
+        setIsStreaming(false);
+      }
+      loadRunningCount();
+      triggerStatusRefresh();
+    }
+  }
+
+  /**
    * 执行技能（包含兼容层的特殊处理）
    */
   async function executeSkill(skill: ClaudeSkill) {
@@ -634,6 +823,49 @@ export default function CommandList() {
                     icon={Icon.List}
                     shortcut={{ modifiers: ["cmd"], key: "s" }}
                   />
+                </ActionPanel>
+              }
+            />
+          )}
+
+          {/* 自由指令入口 - 始终显示（当有文件选中时） */}
+          {activeFile && (
+            <ListItem
+              id="free-command"
+              title={`💬 ${note.trim() ? `自由指令：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}` : "自由指令"}`}
+              subtitle={
+                note.trim()
+                  ? `将对 "${activeFile.split("/").pop()}" 执行`
+                  : "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
+              }
+              icon={Icon.SpeechBubble}
+              accessories={[
+                {
+                  text:
+                    processingCommand === "free-command"
+                      ? "执行中..."
+                      : undefined,
+                  icon:
+                    processingCommand === "free-command"
+                      ? Icon.CircleProgress
+                      : undefined,
+                },
+              ].filter(Boolean)}
+              actions={
+                <ActionPanel>
+                  <Action
+                    title="执行自由指令"
+                    onAction={executeFreeCommand}
+                    icon={Icon.Play}
+                    shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
+                  />
+                  {note.trim() && (
+                    <Action
+                      title={`执行：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}`}
+                      onAction={executeFreeCommand}
+                      icon={Icon.Play}
+                    />
+                  )}
                 </ActionPanel>
               }
             />
