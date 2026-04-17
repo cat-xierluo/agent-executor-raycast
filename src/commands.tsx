@@ -328,7 +328,7 @@ export default function CommandList() {
           },
         });
 
-        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId);
+        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId, result.apiSuccess);
       } else {
         result = await executeClaudeCommand(
           {
@@ -341,7 +341,7 @@ export default function CommandList() {
           logger,
         );
 
-        logger.logCompleted(result.output, result.exitCode);
+        logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
       }
 
       const executionDuration = Date.now() - executionStartTime;
@@ -528,7 +528,7 @@ export default function CommandList() {
           },
         });
 
-        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId);
+        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId, result.apiSuccess);
       } else {
         result = await executeClaudeCommand(
           {
@@ -541,7 +541,7 @@ export default function CommandList() {
           logger,
         );
 
-        logger.logCompleted(result.output, result.exitCode);
+        logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
       }
 
       const executionDuration = Date.now() - executionStartTime;
