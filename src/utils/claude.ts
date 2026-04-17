@@ -318,6 +318,17 @@ export async function executeClaudeStreaming(
           sessionId = parsed.session_id;
         }
 
+        // 处理最终结果 JSON（包含 is_error 字段）
+        if (parsed.type === "result" || parsed.subtype === "success" || parsed.subtype === "error") {
+          // 将完整结果 JSON 追加到 fullOutput（用于后续解析 is_error）
+          fullOutput += line + "\n";
+          // 如果有 result 字段的内容，也追加到实时输出
+          if (parsed.result) {
+            logger?.logRealtime(parsed.result);
+            onChunk?.(parsed.result, false);
+          }
+        }
+
         // 检查是否是最终消息
         if (parsed.type === "done" || parsed.stop_reason) {
           onChunk?.(fullOutput, true);
