@@ -331,7 +331,7 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
     }
   }
 
-  logCompleted(output: string, exitCode: number, pid?: number, sessionId?: string): void {
+  logCompleted(output: string, exitCode: number, pid?: number, sessionId?: string, apiSuccess?: boolean): void {
     const duration = Date.now() - this.startTime;
 
     // 停止实时日志流（如果存在）
@@ -345,7 +345,13 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
     // 使用传入的 pid 或已有的 pid
     const finalPid = pid ?? this.pid;
 
-    if (exitCode === 0) {
+    // 优先使用 apiSuccess 判断成功/失败，如果未提供则回退到 exitCode 判断
+    // apiSuccess === true 表示 API 执行成功（is_error = false）
+    // apiSuccess === false 表示 API 执行失败（is_error = true）
+    // apiSuccess === undefined 时使用 exitCode === 0 判断
+    const isSuccess = apiSuccess !== undefined ? apiSuccess : exitCode === 0;
+
+    if (isSuccess) {
       writeJsonLog("completed", "success", this.runId, {
         duration: duration / 1000,
         pid: finalPid,
@@ -366,7 +372,7 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
         work_dir: this.workDir,
         cmd: this.prompt || "未知命令",
         output: finalOutput.substring(0, 10000), // 限制输出长度，避免JSONL文件过大
-        reason: "execution_error",
+        reason: apiSuccess !== undefined ? "api_error" : "execution_error",
       });
       writeErrorLog(
         this.runId,

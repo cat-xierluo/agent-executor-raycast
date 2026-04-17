@@ -167,6 +167,7 @@ export interface ClaudeExecutionResult {
   duration: number;
   pid?: number;
   sessionId?: string; // Claude Code session ID，用于恢复对话
+  apiSuccess?: boolean; // Claude API 层面的成功状态（基于 is_error 字段），用于日志判断
 }
 
 /**
@@ -188,7 +189,7 @@ export interface ClaudeStreamingOptions {
     startRealtimeLogging: () => void;
     logRealtime: (chunk: string) => void;
     logExecuting?: (prompt: string, pid?: number) => void;
-    logCompleted: (output: string, exitCode: number, pid?: number, sessionId?: string) => void;
+    logCompleted: (output: string, exitCode: number, pid?: number, sessionId?: string, apiSuccess?: boolean) => void;
   };
 }
 
@@ -198,19 +199,47 @@ export interface ClaudeStreamingOptions {
  */
 /**
  * 从项目的 .claude/settings.json 读取 env 字段作为环境变量
+ * 同时扫描 .claude/skills/ 下各 skill 的 assets/skill-env.json 合并环境配置
  */
 function getProjectEnv(projectDir: string): Record<string, string> {
+  const env: Record<string, string> = {};
+
+  // 1. 读取项目级 settings.json
   try {
     const settingsPath = join(projectDir, ".claude/settings.json");
     if (existsSync(settingsPath)) {
-      const content = readFileSync(settingsPath, "utf-8");
-      const settings = JSON.parse(content);
-      return settings.env || {};
+      const settings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      Object.assign(env, settings.env || {});
     }
   } catch {
     // 忽略读取失败
   }
-  return {};
+
+  // 2. 读取各 skill 的 skill-env.json
+  try {
+    const skillsDir = join(projectDir, ".claude/skills");
+    if (existsSync(skillsDir)) {
+      for (const entry of readdirSync(skillsDir)) {
+        const envFile = join(skillsDir, entry, "assets", "skill-env.json");
+        if (existsSync(envFile)) {
+          const skillEnv = JSON.parse(readFileSync(envFile, "utf-8"));
+          if (skillEnv.env) {
+            // PATH 做合并（skill 的 PATH 追加到已有 PATH 前面）
+            if (skillEnv.env.PATH && env.PATH) {
+              const merged = skillEnv.env.PATH + ":" + env.PATH;
+              Object.assign(env, skillEnv.env, { PATH: merged });
+            } else {
+              Object.assign(env, skillEnv.env);
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // 忽略 skill env 读取失败
+  }
+
+  return env;
 }
 
 export async function executeClaudeStreaming(
@@ -362,14 +391,32 @@ export async function executeClaudeStreaming(
       // 清理守护进程
       cleanupProcess();
 
+      // 尝试从 fullOutput 中解析 is_error 字段
+      let apiSuccess: boolean | undefined;
+      try {
+        const jsonMatch = fullOutput.match(/\{[\s\S]*"is_error"\s*:\s*(true|false)[\s\S]*\}/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          if (parsed.is_error !== undefined) {
+            apiSuccess = parsed.is_error === false;
+          }
+        }
+      } catch {
+        // 解析失败，忽略
+      }
+
+      // 优先使用 apiSuccess 判断成功与否
+      const isSuccess = apiSuccess !== undefined ? apiSuccess : code === 0;
+
       resolve({
-        success: code === 0,
+        success: isSuccess,
         output: fullOutput || "(无输出)",
-        error: code !== 0 ? fullOutput : undefined,
+        error: !isSuccess ? fullOutput : undefined,
         exitCode: code || 0,
         duration,
         pid,
         sessionId,
+        apiSuccess,
       });
     });
 
@@ -568,6 +615,7 @@ end tell`;
         let output = "";
         let sessionId: string | undefined;
         let exitCode = code || 0;
+        let apiSuccess: boolean | undefined;
 
         try {
           // 读取完整输出
@@ -581,6 +629,12 @@ end tell`;
               // 提取 session_id
               if (jsonOutput.session_id) {
                 sessionId = jsonOutput.session_id;
+              }
+
+              // 提取 is_error 字段用于判断 API 执行成功与否
+              // 即使进程退出码非 0，只要 is_error === false 仍认为执行成功
+              if (jsonOutput.is_error !== undefined) {
+                apiSuccess = jsonOutput.is_error === false;
               }
 
               // 提取实际结果文本
@@ -605,14 +659,18 @@ end tell`;
         // 清理守护进程
         cleanupProcess();
 
+        // 优先使用 apiSuccess 判断成功与否（如果可用），否则使用 exitCode
+        const isSuccess = apiSuccess !== undefined ? apiSuccess : exitCode === 0;
+
         resolve({
-          success: exitCode === 0,
+          success: isSuccess,
           output: output || "(无输出)",
-          error: exitCode !== 0 ? output : undefined,
+          error: !isSuccess ? output : undefined,
           exitCode,
           duration,
           pid,
           sessionId,
+          apiSuccess,
         });
       });
 
