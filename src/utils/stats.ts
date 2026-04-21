@@ -43,6 +43,18 @@ export interface StatsData {
 // 统计数据文件路径
 const STATS_FILE = join(LOG_DIR, "stats.json");
 
+// 缓存机制
+let statsCache: StatsData | null = null;
+let cacheTimestamp: number = 0;
+const CACHE_TTL_MS = 5000; // 缓存有效期 5 秒
+
+/**
+ * 使缓存失效（当有新的 recordExecution 时调用）
+ */
+export function invalidateStatsCache(): void {
+  statsCache = null;
+}
+
 /**
  * 确保日志目录存在
  */
@@ -53,9 +65,9 @@ function ensureStatsDir() {
 }
 
 /**
- * 读取统计数据
+ * 从文件读取统计数据（实际文件 IO）
  */
-export function readStats(): StatsData {
+function readStatsFromFile(): StatsData {
   ensureStatsDir();
 
   if (!existsSync(STATS_FILE)) {
@@ -75,6 +87,21 @@ export function readStats(): StatsData {
       lastUpdated: new Date().toISOString(),
     };
   }
+}
+
+/**
+ * 读取统计数据（带缓存）
+ */
+export function readStats(): StatsData {
+  // 检查缓存是否有效
+  if (statsCache && Date.now() - cacheTimestamp < CACHE_TTL_MS) {
+    return statsCache;
+  }
+
+  // 读取文件并更新缓存
+  statsCache = readStatsFromFile();
+  cacheTimestamp = Date.now();
+  return statsCache;
 }
 
 /**
@@ -153,6 +180,9 @@ export function recordExecution(
 
   // 写入更新后的统计数据
   writeStats(stats);
+
+  // 使缓存失效
+  invalidateStatsCache();
 }
 
 /**

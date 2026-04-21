@@ -3,6 +3,7 @@ import { join } from "path";
 import { Icon } from "@raycast/api";
 import { getProjectName } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
+import { readStats } from "./stats";
 
 /**
  * Claude Skill 接口
@@ -19,6 +20,7 @@ export interface ClaudeSkill {
   projectName?: string;
   projectDir?: string;
   isSymlink?: boolean;
+  executions?: number;
 }
 
 /**
@@ -138,12 +140,31 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
   // 应用元数据（复用现有逻辑）
   const skillsWithMetadata = applyMetadataToSkills(allSkills);
 
-  // 排序：置顶的在前，然后是新的，最后按名称排序
-  return skillsWithMetadata.sort((a, b) => {
+  // 读取统计数据（带缓存）
+  const stats = readStats();
+
+  // 添加使用次数
+  const skillsWithExecutions = skillsWithMetadata.map((skill) => ({
+    ...skill,
+    executions: stats.commands[skill.name]?.totalExecutions || 0,
+  }));
+
+  // 排序：pinned > isNew > 使用频次 > 名称
+  return skillsWithExecutions.sort((a, b) => {
+    // 1. pinned 优先
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
+
+    // 2. isNew 其次
     if (a.isNew && !b.isNew) return -1;
     if (!a.isNew && b.isNew) return 1;
+
+    // 3. 使用频次（高频在前）
+    const aExecutions = stats.commands[a.name]?.totalExecutions || 0;
+    const bExecutions = stats.commands[b.name]?.totalExecutions || 0;
+    if (aExecutions !== bExecutions) return bExecutions - aExecutions;
+
+    // 4. 名称字母序
     return a.name.localeCompare(b.name);
   });
 }

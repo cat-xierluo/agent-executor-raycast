@@ -891,9 +891,8 @@ export default function CommandList() {
                 skill.isNew && !skill.pinned
                   ? { text: "新", icon: Icon.Star }
                   : null,
-                skill.isSymlink ? { text: "链接", icon: Icon.Link } : null,
-                skill.projectName
-                  ? { text: skill.projectName, icon: Icon.Folder }
+                skill.executions && skill.executions > 0
+                  ? { text: String(skill.executions) }
                   : null,
               ].filter(Boolean)}
               actions={
