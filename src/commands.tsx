@@ -49,6 +49,9 @@ const SKILLS_REQUIRE_CONFIRM: Record<
   "sync-external": { title: "同步外部文件", message: "确定要同步外部文件吗?" },
 };
 
+// 支持多个文件的 Skill 名称列表
+const SKILLS_MULTI_FILE = ["tingwu-asr", "funasr-transcribe"];
+
 export default function CommandList() {
   const [items, setItems] = useState<ClaudeSkill[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -400,6 +403,7 @@ export default function CommandList() {
         setIsStreaming(false);
       }
       loadRunningCount();
+      loadSkills();
       triggerStatusRefresh();
     }
   }
@@ -499,9 +503,18 @@ export default function CommandList() {
 
       // 构建 prompt
       let prompt = `/${skill.name}`;
-      if (actualFilePath && needsFile) {
-        prompt += ` "${actualFilePath}"`;
+
+      if (needsFile) {
+        const isMultiFile = SKILLS_MULTI_FILE.includes(skill.name);
+        if (isMultiFile && validFiles.length > 1) {
+          // 多文件技能：传递所有选中文件
+          prompt += " " + validFiles.map((f) => `"${f}"`).join(" ");
+        } else if (actualFilePath) {
+          // 单文件：只传一个
+          prompt += ` "${actualFilePath}"`;
+        }
       }
+
       if (note && note.trim()) {
         prompt += ` ${note.trim()}`;
       }
@@ -600,6 +613,7 @@ export default function CommandList() {
         setIsStreaming(false);
       }
       loadRunningCount();
+      loadSkills();
       triggerStatusRefresh();
     }
   }
