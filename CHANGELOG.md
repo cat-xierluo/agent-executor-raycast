@@ -2,6 +2,31 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [0.7.0] - 2026-04-27
+
+### tingwu-asr：去重检查 + PPT 幻灯片隔离
+
+- **去重检查**：转录前自动检查 `completed_tasks.json` 和 `pending_tasks.json`，避免重复上传浪费额度
+  - 本地已有转录结果 → 直接跳过
+  - 本地结果缺失但云端有 → 直接从云端下载，不重新上传
+  - 正在转录中 → 跳过避免重复提交
+  - 新增 `--force` 参数，强制重新上传即使已有转录结果
+  - 若上次说话人数量与本次不同，会提示使用 `--force` 重转
+- **PPT 幻灯片按文件隔离**：幻灯片图片保存目录从 `slides/` 改为 `{文件名}_slides/`，同目录下多个视频的 PPT 图片不再互相覆盖
+
+## [0.6.0] - 2026-04-25
+
+- **video-compressor：静默/静止片段剪切功能**
+  - 新增脚本 `scripts/trim_silences.py`，支持检测并去除视频中同时满足以下条件的片段：
+    1. 音频静默（无声）
+    2. 画面静止（连续帧几乎无变化，如休息时无操作、黑屏）
+  - 输出精剪版视频（去除了目标片段）和被剪片段目录（供复查）
+  - 默认参数：`--min-duration 120`（仅剪≥2分钟的片段）、`--scene-threshold 0.05`（轻微页面变化可接受）
+  - 适用场景：课程录制中途休息、会议室无人等待等长时间无效内容
+- **video-compressor 默认参数调整**
+  - `--min-duration` 默认值从 3s 调整为 120s（2分钟）
+  - `--scene-threshold` 默认值从 0.1 调整为 0.05（更严格的静止判定）
+
 ## [0.5.1] - 2026-04-09
 
 ### 修复 (Fixed)
@@ -13,8 +38,6 @@
 
 ## [0.5.0] - 2026-04-05
 
-### 变更 (Changed)
-
 - **移除 Commands 支持，统一为 Skills**：扩展不再扫描 `.claude/commands/` 目录，只使用 `.claude/skills/` 目录
   - 删除 `src/utils/commands.ts`（命令扫描、@include 解析等逻辑）
   - `commands.tsx` 移除 `executeCommand()` 函数，统一使用 `executeSkill()`
@@ -22,17 +45,13 @@
   - 移除 `ClaudeCommand` 类型和 `ExecutorItem` 联合类型，列表直接使用 `ClaudeSkill[]`
   - UI 移除 Command/Skill 类型标签区分（都是 Skill）
   - 空状态提示更新为"请在 .claude/skills/ 目录中添加技能"
-
 - **保留兼容层**：特定名称的 Skill 仍享有特殊处理
   - `deepresearch`：不需要文件选择即可执行
   - `sync-external`：执行前弹出确认对话框
   - 通过 `SKILLS_NO_FILE_REQUIRED` 和 `SKILLS_REQUIRE_CONFIRM` 常量配置
-
-### 移除 (Removed)
-
-- `src/utils/commands.ts`：命令扫描、@include 解析、`ClaudeCommand` 接口等全部移除
-- `scanCommands()`、`readCommandContent()`、`readFileWithIncludes()` 函数
-- `toggleCommandPinned()`、`toggleCommandNew()` 调用（UI 统一使用 Skill 版本）
+- **移除**：`src/utils/commands.ts`：命令扫描、@include 解析、`ClaudeCommand` 接口等全部移除
+  - `scanCommands()`、`readCommandContent()`、`readFileWithIncludes()` 函数
+  - `toggleCommandPinned()`、`toggleCommandNew()` 调用（UI 统一使用 Skill 版本）
 
 ## [0.4.0] - 2026-04-04
 
