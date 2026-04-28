@@ -13,7 +13,7 @@ import {
   openCommandPreferences,
   Detail,
 } from "@raycast/api";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   executeClaudeCommand,
   executeClaudeStreaming,
@@ -33,6 +33,7 @@ import {
   isFinderFrontmost,
 } from "./utils/devonthink";
 import { readdirSync, statSync } from "fs";
+import { execSync } from "child_process";
 import { join } from "path";
 import { countRunningCommands } from "./utils/status";
 import { recordExecution, getGlobalSummary } from "./utils/stats";
@@ -49,8 +50,6 @@ const SKILLS_REQUIRE_CONFIRM: Record<
   "sync-external": { title: "同步外部文件", message: "确定要同步外部文件吗?" },
 };
 
-// 支持多个文件的 Skill 名称列表
-const SKILLS_MULTI_FILE = ["tingwu-asr", "funasr-transcribe"];
 
 export default function CommandList() {
   const [items, setItems] = useState<ClaudeSkill[]>([]);
@@ -59,13 +58,14 @@ export default function CommandList() {
   const [devonThinkRecords, setDevonThinkRecords] = useState<
     Map<string, DevonThinkRecord>
   >(new Map());
-  const [processingCommand, setProcessingCommand] = useState<string | null>(
-    null,
-  );
+  const [processingCommand, setProcessingCommand] = useState<{ name: string; pid?: number }[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [note, setNote] = useState<string>("");
   const [runningCount, setRunningCount] = useState<number>(0);
   const [totalExecutions, setTotalExecutions] = useState<number>(0);
+  const [showAllFiles, setShowAllFiles] = useState<boolean>(false);
+  // 记录正在执行技能的 PID，用于取消功能
+  const activePids = useRef<Record<string, number>>({});
 
   // 流式输出相关状态
   const [streamingOutput, setStreamingOutput] = useState<string>("");
@@ -212,6 +212,7 @@ export default function CommandList() {
 
     setSelectedFiles(filePaths);
     setDevonThinkRecords(recordsMap);
+    setShowAllFiles(false); // 重置展开状态
 
     if (source && forceUpdate) {
       await showToast({
@@ -229,7 +230,7 @@ export default function CommandList() {
    * 执行自由指令（直接输入prompt，不走skill）
    */
   async function executeFreeCommand() {
-    if (processingCommand) return;
+    if (processingCommand.some((c) => c.name === "free-command")) return;
 
     const validFiles = selectedFiles.filter(
       (file) => file && file.trim().length > 0,
@@ -255,7 +256,7 @@ export default function CommandList() {
       return;
     }
 
-    setProcessingCommand("free-command");
+    setProcessingCommand((prev) => [...prev, { name: "free-command" }]);
 
     // DEVONthink 文件导出
     let actualFilePath = executionFile;
@@ -292,7 +293,7 @@ export default function CommandList() {
           title: "导出文件失败",
           message: error instanceof Error ? error.message : "未知错误",
         });
-        setProcessingCommand(null);
+        setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
         return;
       }
     }
@@ -338,6 +339,7 @@ export default function CommandList() {
         });
 
         logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId, result.apiSuccess);
+        if (result.pid) activePids.current["free-command"] = result.pid;
       } else {
         result = await executeClaudeCommand(
           {
@@ -351,6 +353,7 @@ export default function CommandList() {
         );
 
         logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
+        if (result.pid) activePids.current["free-command"] = result.pid;
       }
 
       const executionDuration = Date.now() - executionStartTime;
@@ -404,7 +407,8 @@ export default function CommandList() {
       const executionDuration = Date.now() - executionStartTime;
       recordExecution("free-command", false, executionDuration);
     } finally {
-      setProcessingCommand(null);
+      delete activePids.current["free-command"];
+      setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
       if (config.streamingMode && config.headlessMode) {
         setIsStreaming(false);
       }
@@ -418,7 +422,7 @@ export default function CommandList() {
    * 执行技能（包含兼容层的特殊处理）
    */
   async function executeSkill(skill: ClaudeSkill) {
-    if (processingCommand) return;
+    if (processingCommand.some((c) => c.name === skill.name)) return;
 
     const needsFile = !SKILLS_NO_FILE_REQUIRED.includes(skill.name);
 
@@ -448,7 +452,7 @@ export default function CommandList() {
       if (!confirmed) return;
     }
 
-    setProcessingCommand(skill.name);
+    setProcessingCommand((prev) => [...prev, { name: skill.name }]);
 
     // DEVONthink 文件导出
     let actualFilePath = executionFile || "";
@@ -485,7 +489,7 @@ export default function CommandList() {
           title: "导出文件失败",
           message: error instanceof Error ? error.message : "未知错误",
         });
-        setProcessingCommand(null);
+        setProcessingCommand((prev) => prev.filter((c) => c.name !== skill.name));
         return;
       }
     }
@@ -510,9 +514,8 @@ export default function CommandList() {
       let prompt = `/${skill.name}`;
 
       if (needsFile) {
-        const isMultiFile = SKILLS_MULTI_FILE.includes(skill.name);
-        if (isMultiFile && validFiles.length > 1) {
-          // 多文件技能：传递所有选中文件
+        if (validFiles.length > 1) {
+          // 多文件：传递所有选中文件
           prompt += " " + validFiles.map((f) => `"${f}"`).join(" ");
         } else if (actualFilePath) {
           // 单文件：只传一个
@@ -547,6 +550,7 @@ export default function CommandList() {
         });
 
         logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId, result.apiSuccess);
+        if (result.pid) activePids.current[skill.name] = result.pid;
       } else {
         result = await executeClaudeCommand(
           {
@@ -560,6 +564,7 @@ export default function CommandList() {
         );
 
         logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
+        if (result.pid) activePids.current[skill.name] = result.pid;
       }
 
       const executionDuration = Date.now() - executionStartTime;
@@ -613,7 +618,8 @@ export default function CommandList() {
       const executionDuration = Date.now() - executionStartTime;
       recordExecution(skill.name, false, executionDuration);
     } finally {
-      setProcessingCommand(null);
+      delete activePids.current[skill.name];
+      setProcessingCommand((prev) => prev.filter((c) => c.name !== skill.name));
       if (config.streamingMode && config.headlessMode) {
         setIsStreaming(false);
       }
@@ -731,8 +737,20 @@ export default function CommandList() {
     >
       {/* 选中的文件 */}
       {selectedFiles.length > 0 && (
-        <List.Section title={`选中的文件 (${selectedFiles.length})`}>
-          {selectedFiles.map((file, index) => (
+        <List.Section
+          title={`选中的文件 (${selectedFiles.length})${!showAllFiles && selectedFiles.length > 3 ? ` (显示 3/${selectedFiles.length})` : ""}`}
+          actions={
+            <ActionPanel>
+              <Action
+                title={showAllFiles ? "收起文件列表" : `显示全部 ${selectedFiles.length} 个文件`}
+                onAction={() => setShowAllFiles(!showAllFiles)}
+                icon={showAllFiles ? Icon.ChevronUp : Icon.ChevronDown}
+                shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
+              />
+            </ActionPanel>
+          }
+        >
+          {(showAllFiles ? selectedFiles : selectedFiles.slice(0, 3)).map((file, index) => (
             <ListItem
               key={`${file}-${index}-${refreshKey}`}
               id={`file-${index}`}
@@ -844,11 +862,11 @@ export default function CommandList() {
               accessories={[
                 {
                   text:
-                    processingCommand === "free-command"
+                    processingCommand.some((c) => c.name === "free-command")
                       ? "执行中..."
                       : undefined,
                   icon:
-                    processingCommand === "free-command"
+                    processingCommand.some((c) => c.name === "free-command")
                       ? Icon.CircleProgress
                       : undefined,
                 },
@@ -883,9 +901,9 @@ export default function CommandList() {
               accessories={[
                 {
                   text:
-                    processingCommand === skill.name ? "执行中..." : undefined,
+                    processingCommand.some((c) => c.name === skill.name) ? "执行中..." : undefined,
                   icon:
-                    processingCommand === skill.name
+                    processingCommand.some((c) => c.name === skill.name)
                       ? Icon.CircleProgress
                       : undefined,
                 },
@@ -905,6 +923,24 @@ export default function CommandList() {
                     icon={Icon.Play}
                     shortcut={{ modifiers: ["cmd"], key: "enter" }}
                   />
+                  {processingCommand.some((c) => c.name === skill.name) && (
+                    <Action
+                      title="取消执行"
+                      onAction={() => {
+                        const pid = activePids.current[skill.name];
+                        if (pid) {
+                          try {
+                            execSync(`kill ${pid}`, { stdio: "ignore" });
+                          } catch {}
+                        }
+                        setProcessingCommand((prev) =>
+                          prev.filter((c) => c.name !== skill.name),
+                        );
+                      }}
+                      icon={Icon.XMarkCircle}
+                      shortcut={{ modifiers: ["cmd", "shift"], key: "k" }}
+                    />
+                  )}
                   {note && note.trim() && (
                     <Action
                       title={`执行技能（带备注："${note.trim()}"）`}
