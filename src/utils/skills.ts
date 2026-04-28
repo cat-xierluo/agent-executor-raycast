@@ -4,6 +4,7 @@ import { Icon } from "@raycast/api";
 import { getProjectName } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
 import { readStats } from "./stats";
+import { countExecutionsFromLog } from "./status";
 
 /**
  * Claude Skill 接口
@@ -142,11 +143,15 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
 
   // 读取统计数据（带缓存）
   const stats = readStats();
+  const logCounts = countExecutionsFromLog();
 
-  // 添加使用次数
+  // 添加使用次数（取 stats.json 和 JSONL 日志中的较大值）
   const skillsWithExecutions = skillsWithMetadata.map((skill) => ({
     ...skill,
-    executions: stats.commands[skill.name]?.totalExecutions || 0,
+    executions: Math.max(
+      stats.commands[skill.name]?.totalExecutions || 0,
+      logCounts[skill.name] || 0,
+    ),
   }));
 
   // 排序：pinned > isNew > 使用频次 > 名称
@@ -160,9 +165,7 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
     if (!a.isNew && b.isNew) return 1;
 
     // 3. 使用频次（高频在前）
-    const aExecutions = stats.commands[a.name]?.totalExecutions || 0;
-    const bExecutions = stats.commands[b.name]?.totalExecutions || 0;
-    if (aExecutions !== bExecutions) return bExecutions - aExecutions;
+    if (a.executions !== b.executions) return (b.executions || 0) - (a.executions || 0);
 
     // 4. 名称字母序
     return a.name.localeCompare(b.name);

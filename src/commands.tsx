@@ -81,6 +81,7 @@ export default function CommandList() {
 
     const interval = setInterval(() => {
       loadRunningCount();
+      loadSkills();
     }, 5000);
 
     const fileRefreshInterval = setInterval(() => {

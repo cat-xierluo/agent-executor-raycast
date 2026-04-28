@@ -299,7 +299,7 @@ export function groupLogsByRunId(entries: LogEntry[]): Map<string, LogEntry[]> {
  * 从命令字符串中提取命令名称
  * 例如："/legal-router \"/path/to/file.pdf\"" -> "legal-router"
  */
-function extractCommandName(cmd: string): string {
+export function extractCommandName(cmd: string): string {
   const match = cmd.match(/^\/([a-zA-Z0-9-]+)/);
   return match ? match[1] : cmd;
 }
@@ -670,4 +670,33 @@ export function clearAllHistory(): {
   }
 
   return { deletedCount, runningCount: running.length };
+}
+
+/**
+ * 从 JSONL 日志统计每个技能的执行次数
+ * 基于 "executing" 事件（每个执行有且仅有一个）
+ */
+let logCountCache: Record<string, number> | null = null;
+let logCountCacheTime = 0;
+const LOG_COUNT_CACHE_TTL = 5000;
+
+export function countExecutionsFromLog(): Record<string, number> {
+  if (logCountCache && Date.now() - logCountCacheTime < LOG_COUNT_CACHE_TTL) {
+    return logCountCache;
+  }
+
+  const entries = readLogEntries();
+  const executingEntries = entries.filter((e) => e.event === "executing");
+
+  const counts: Record<string, number> = {};
+  for (const entry of executingEntries) {
+    if (entry.cmd) {
+      const name = extractCommandName(entry.cmd);
+      counts[name] = (counts[name] || 0) + 1;
+    }
+  }
+
+  logCountCache = counts;
+  logCountCacheTime = Date.now();
+  return counts;
 }
