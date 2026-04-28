@@ -59,7 +59,6 @@ export default function CommandList() {
   const [devonThinkRecords, setDevonThinkRecords] = useState<
     Map<string, DevonThinkRecord>
   >(new Map());
-  const [activeFile, setActiveFile] = useState<string>("");
   const [processingCommand, setProcessingCommand] = useState<string | null>(
     null,
   );
@@ -83,7 +82,14 @@ export default function CommandList() {
       loadRunningCount();
     }, 5000);
 
-    return () => clearInterval(interval);
+    const fileRefreshInterval = setInterval(() => {
+      loadSelectedFiles();
+    }, 2000);
+
+    return () => {
+      clearInterval(interval);
+      clearInterval(fileRefreshInterval);
+    };
   }, []);
 
   function loadRunningCount() {
@@ -203,9 +209,7 @@ export default function CommandList() {
     setSelectedFiles(filePaths);
     setDevonThinkRecords(recordsMap);
 
-    const newActiveFile = filePaths[0];
-
-    if (source && (forceUpdate || newActiveFile !== activeFile)) {
+    if (source && forceUpdate) {
       await showToast({
         style: Toast.Style.Success,
         title: `从 ${source} 获取了 ${filePaths.length} 个文件`,
@@ -214,7 +218,6 @@ export default function CommandList() {
       });
     }
 
-    setActiveFile(newActiveFile);
     setRefreshKey((prev) => prev + 1);
   }
 
@@ -227,8 +230,7 @@ export default function CommandList() {
     const validFiles = selectedFiles.filter(
       (file) => file && file.trim().length > 0,
     );
-    const executionFile =
-      activeFile && activeFile.trim().length > 0 ? activeFile : validFiles[0];
+    const executionFile = validFiles[0];
 
     if (!executionFile) {
       await showToast({
@@ -420,8 +422,7 @@ export default function CommandList() {
     const validFiles = selectedFiles.filter(
       (file) => file && file.trim().length > 0,
     );
-    const executionFile =
-      activeFile && activeFile.trim().length > 0 ? activeFile : validFiles[0];
+    const executionFile = validFiles[0];
 
     if (needsFile && !executionFile) {
       await showToast({
@@ -724,86 +725,47 @@ export default function CommandList() {
         </ActionPanel>
       }
     >
-      {/* 当前文件详情 */}
-      {activeFile && (
-        <List.Section title="当前选中文件">
-          <ListItem
-            key={`active-file-${refreshKey}`}
-            id="active-file-detail"
-            title={activeFile.split("/").pop() || activeFile}
-            subtitle={activeFile}
-            icon={Icon.Document}
-            accessories={[
-              { text: "当前选中", icon: Icon.CheckCircle },
-              (() => {
-                const record = devonThinkRecords.get(activeFile);
-                if (record) {
-                  if (isDevonThinkURL(activeFile)) {
-                    return { text: "🔗 DevonThink URL", icon: Icon.Link };
-                  } else if (isFilesNoIndexPath(activeFile)) {
-                    return { text: "📦 导入文件", icon: Icon.Box };
-                  } else if (record.hasFileSystemPath) {
-                    return { text: "✓ 索引文件", icon: Icon.Check };
-                  }
-                }
-                return null;
-              })(),
-            ].filter(Boolean)}
-            actions={
-              <ActionPanel>
-                <Action.Open
-                  title="在 Finder 中显示"
-                  target={activeFile}
-                  icon={Icon.Finder}
-                />
-                <Action.CopyToClipboard
-                  title="复制路径"
-                  content={activeFile}
-                  shortcut={{ modifiers: ["cmd"], key: "c" }}
-                />
-              </ActionPanel>
-            }
-          />
-        </List.Section>
-      )}
-
-      {/* 其他选中的文件 */}
-      {selectedFiles.length > 1 && (
-        <List.Section title={`其他选中的文件 (${selectedFiles.length - 1})`}>
-          {selectedFiles
-            .filter((f) => f !== activeFile)
-            .slice(0, 3)
-            .map((file, index) => (
-              <ListItem
-                key={`${file}-${index}-${refreshKey}`}
-                id={`other-file-${index}`}
-                title={file.split("/").pop() || file}
-                subtitle={file}
-                icon={Icon.Document}
-                accessories={[{ text: "已选中" }]}
-                actions={
-                  <ActionPanel>
-                    <Action
-                      title="切换到此文件"
-                      onAction={() => {
-                        setActiveFile(file);
-                        setRefreshKey((prev) => prev + 1);
-                      }}
-                      icon={Icon.Repeat}
-                      shortcut={{ modifiers: ["cmd"], key: "t" }}
-                    />
-                  </ActionPanel>
-                }
-              />
-            ))}
-          {selectedFiles.filter((f) => f !== activeFile).length > 3 && (
+      {/* 选中的文件 */}
+      {selectedFiles.length > 0 && (
+        <List.Section title={`选中的文件 (${selectedFiles.length})`}>
+          {selectedFiles.map((file, index) => (
             <ListItem
-              id="more-files"
-              title={`还有 ${selectedFiles.filter((f) => f !== activeFile).length - 3} 个文件...`}
-              icon={Icon.Ellipsis}
-              subtitle="所有选中的文件都将被处理"
+              key={`${file}-${index}-${refreshKey}`}
+              id={`file-${index}`}
+              title={file.split("/").pop() || file}
+              subtitle={file}
+              icon={Icon.Document}
+              accessories={[
+                (() => {
+                  const record = devonThinkRecords.get(file);
+                  if (record) {
+                    if (isDevonThinkURL(file)) {
+                      return { text: "🔗 DevonThink URL", icon: Icon.Link };
+                    } else if (isFilesNoIndexPath(file)) {
+                      return { text: "📦 导入文件", icon: Icon.Box };
+                    } else if (record.hasFileSystemPath) {
+                      return { text: "✓ 索引文件", icon: Icon.Check };
+                    }
+                  }
+                  return null;
+                })(),
+              ].filter(Boolean)}
+              actions={
+                <ActionPanel>
+                  <Action.Open
+                    title="在 Finder 中显示"
+                    target={file}
+                    icon={Icon.Finder}
+                  />
+                  <Action.CopyToClipboard
+                    title="复制路径"
+                    content={file}
+                    shortcut={{ modifiers: ["cmd"], key: "c" }}
+                  />
+                </ActionPanel>
+              }
             />
-          )}
+          ))}
         </List.Section>
       )}
 
@@ -819,7 +781,9 @@ export default function CommandList() {
           title={`可用技能 (${items.length})`}
           subtitle={
             selectedFiles.length > 0
-              ? `将对 "${activeFile.split("/").pop() || activeFile}" 执行`
+              ? selectedFiles.length === 1
+                ? `将对 "${selectedFiles[0].split("/").pop() || selectedFiles[0]}" 执行`
+                : `将对 ${selectedFiles.length} 个文件执行`
               : "请先在 DEVONthink 或 Finder 中选择文件"
           }
         >
@@ -843,13 +807,15 @@ export default function CommandList() {
           )}
 
           {/* 自由指令入口 - 始终显示（当有文件选中时） */}
-          {activeFile && (
+          {selectedFiles.length > 0 && (
             <ListItem
               id="free-command"
               title={`💬 ${note.trim() ? `自由指令：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}` : "自由指令"}`}
               subtitle={
                 note.trim()
-                  ? `将对 "${activeFile.split("/").pop()}" 执行`
+                  ? selectedFiles.length === 1
+                    ? `将对 "${selectedFiles[0].split("/").pop()}" 执行`
+                    : `将对 ${selectedFiles.length} 个文件执行`
                   : "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
               }
               icon={Icon.SpeechBubble}
