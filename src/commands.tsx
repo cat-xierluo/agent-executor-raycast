@@ -35,7 +35,7 @@ import {
 import { readdirSync, statSync } from "fs";
 import { join } from "path";
 import { countRunningCommands } from "./utils/status";
-import { recordExecution } from "./utils/stats";
+import { recordExecution, getGlobalSummary } from "./utils/stats";
 import StatusList from "./status";
 import { triggerStatusRefresh } from "./contexts/StatusRefreshContext";
 
@@ -65,6 +65,7 @@ export default function CommandList() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [note, setNote] = useState<string>("");
   const [runningCount, setRunningCount] = useState<number>(0);
+  const [totalExecutions, setTotalExecutions] = useState<number>(0);
 
   // 流式输出相关状态
   const [streamingOutput, setStreamingOutput] = useState<string>("");
@@ -95,6 +96,8 @@ export default function CommandList() {
   function loadRunningCount() {
     try {
       setRunningCount(countRunningCommands());
+      const summary = getGlobalSummary();
+      setTotalExecutions(summary.totalExecutions);
     } catch (error) {
       console.error("Failed to load running count:", error);
     }
@@ -791,8 +794,26 @@ export default function CommandList() {
             <ListItem
               id="running-indicator"
               title={`🟢 ${runningCount} 个 Agent 正在运行`}
-              subtitle="点击查看Agent 运行状态"
+              subtitle={`累计已执行 ${totalExecutions} 次`}
               icon={Icon.CircleProgress}
+              actions={
+                <ActionPanel>
+                  <Action.Push
+                    title="查看Agent 运行状态"
+                    target={<StatusList />}
+                    icon={Icon.List}
+                    shortcut={{ modifiers: ["cmd"], key: "s" }}
+                  />
+                </ActionPanel>
+              }
+            />
+          )}
+          {runningCount === 0 && totalExecutions > 0 && (
+            <ListItem
+              id="stats-indicator"
+              title={`📊 累计执行 ${totalExecutions} 次`}
+              subtitle="查看运行状态与历史"
+              icon={Icon.BarChart}
               actions={
                 <ActionPanel>
                   <Action.Push
