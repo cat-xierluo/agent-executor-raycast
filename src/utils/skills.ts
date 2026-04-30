@@ -191,7 +191,7 @@ function extractSkillInfo(
 
   // 尝试解析 frontmatter (YAML 格式: ---\nkey: value\n---)
   let inFrontmatter = false;
-  let frontmatterLines: string[] = [];
+  let frontmatterRawLines: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -207,20 +207,41 @@ function extractSkillInfo(
       inFrontmatter = false;
 
       // 解析 frontmatter - 只提取 description
-      const frontmatterText = frontmatterLines.join("\n");
+      const frontmatterText = frontmatterRawLines.join("\n");
       const descMatch = frontmatterText.match(/description:\s*(.+)/);
 
       if (descMatch) {
-        description = descMatch[1].trim().replace(/^["']|["']$/g, "");
+        const descValue = descMatch[1].trim().replace(/^["']|["']$/g, "");
+
+        // 检查是否是 YAML 多行字符串（| 或 > 开头）
+        if (descValue === "|" || descValue === ">") {
+          // 收集多行描述：找到 description: | 所在行之后的缩进行（使用原始行检查缩进）
+          const descLineIndex = frontmatterRawLines.findIndex((l) =>
+            l.trim().startsWith("description:"),
+          );
+          if (descLineIndex !== -1) {
+            const descLines: string[] = [];
+            for (
+              let j = descLineIndex + 1;
+              j < frontmatterRawLines.length && frontmatterRawLines[j].startsWith("  ");
+              j++
+            ) {
+              descLines.push(frontmatterRawLines[j].trim());
+            }
+            description = descLines.join(" ").replace(/^["']|["']$/g, "");
+          }
+        } else {
+          description = descValue;
+        }
       }
 
       // 找到 description 后直接返回
       break;
     }
 
-    // 收集 frontmatter 内容
+    // 收集 frontmatter 内容（存储原始行以保留缩进信息）
     if (inFrontmatter) {
-      frontmatterLines.push(line);
+      frontmatterRawLines.push(lines[i]);
       continue;
     }
 
