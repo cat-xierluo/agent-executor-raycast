@@ -129,8 +129,17 @@ function scanSingleProjectSkills(projectDir: string): ClaudeSkill[] {
 
 /**
  * 扫描多个项目目录，获取所有可用的技能
+ * 带缓存：10 秒内重复调用直接返回缓存结果
  */
+let skillsCache: ClaudeSkill[] | null = null;
+let skillsCacheTime = 0;
+const SKILLS_CACHE_TTL = 10000;
+
 export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
+  if (skillsCache && Date.now() - skillsCacheTime < SKILLS_CACHE_TTL) {
+    return skillsCache;
+  }
+
   const allSkills: ClaudeSkill[] = [];
 
   for (const dir of projectDirs) {
@@ -155,7 +164,7 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
   }));
 
   // 排序：pinned > isNew > 使用频次 > 名称
-  return skillsWithExecutions.sort((a, b) => {
+  const sorted = skillsWithExecutions.sort((a, b) => {
     // 1. pinned 优先
     if (a.pinned && !b.pinned) return -1;
     if (!a.pinned && b.pinned) return 1;
@@ -170,6 +179,15 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
     // 4. 名称字母序
     return a.name.localeCompare(b.name);
   });
+
+  skillsCache = sorted;
+  skillsCacheTime = Date.now();
+  return sorted;
+}
+
+export function invalidateSkillsCache(): void {
+  skillsCache = null;
+  skillsCacheTime = 0;
 }
 
 /**
