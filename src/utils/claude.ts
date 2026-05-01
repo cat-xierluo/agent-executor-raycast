@@ -621,7 +621,6 @@ end tell`;
 
       // 监听进程结束
       child.on("close", (code) => {
-        clearTimeout(timeout);
         const duration = Date.now() - startTime;
         let output = "";
         let sessionId: string | undefined;
@@ -686,7 +685,6 @@ end tell`;
       });
 
       child.on("error", (error) => {
-        clearTimeout(timeout);
         const duration = Date.now() - startTime;
 
         // 清理临时文件
@@ -706,43 +704,6 @@ end tell`;
           pid,
         });
       });
-
-      // 5 分钟后超时
-      const timeout = setTimeout(() => {
-        // 检查子进程是否仍在运行
-        try {
-          process.kill(pid!, 0); // 发送信号 0 检查进程是否存在
-        } catch {
-          // 进程已结束，不需要超时处理
-          return;
-        }
-
-        // 进程仍在运行，强制终止
-        child.kill();
-
-        const duration = Date.now() - startTime;
-
-        // 尝试读取已有输出
-        let output = "命令执行超时（5分钟）";
-        try {
-          if (existsSync(tempOutputFile)) {
-            const partialOutput = readFileSync(tempOutputFile, "utf-8");
-            if (partialOutput) {
-              output = `${partialOutput}\n\n[命令执行超时]`;
-            }
-            unlinkSync(tempOutputFile);
-          }
-        } catch {}
-
-        resolve({
-          success: false,
-          output,
-          error: "Timeout after 5 minutes",
-          exitCode: -1,
-          duration,
-          pid,
-        });
-      }, 300000);
     } catch (error: any) {
       // 启动失败
       const duration = Date.now() - startTime;
