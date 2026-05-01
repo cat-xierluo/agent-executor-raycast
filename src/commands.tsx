@@ -30,15 +30,27 @@ import {
   isFilesNoIndexPath,
   DevonThinkRecord,
   getFrontmostApplication,
-  isFinderFrontmost,
+  isFinderApp,
+  isVSCodeApp,
+  getVSCodeActiveFile,
 } from "./utils/devonthink";
 import { readdirSync, statSync } from "fs";
-import { execSync } from "child_process";
 import { join } from "path";
 import { countRunningCommands } from "./utils/status";
 import { recordExecution, getGlobalSummary } from "./utils/stats";
 import StatusList from "./status";
 import { triggerStatusRefresh } from "./contexts/StatusRefreshContext";
+import {
+  initQueue,
+  enqueue,
+  dequeue,
+  getQueuedTasks,
+  getConcurrencyLimit,
+  setExecutor,
+  scheduleNext,
+  restoreAndSchedule,
+  QueuedTask,
+} from "./utils/taskQueue";
 
 // 不需要文件的 Skill 名称列表（兼容层）
 const SKILLS_NO_FILE_REQUIRED = ["deepresearch", "sync-external"];
@@ -59,11 +71,11 @@ export default function CommandList() {
     Map<string, DevonThinkRecord>
   >(new Map());
   const [processingCommand, setProcessingCommand] = useState<{ name: string; pid?: number }[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [note, setNote] = useState<string>("");
   const [runningCount, setRunningCount] = useState<number>(0);
   const [totalExecutions, setTotalExecutions] = useState<number>(0);
   const [showAllFiles, setShowAllFiles] = useState<boolean>(false);
+  const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
   // 记录正在执行技能的 PID，用于取消功能
   const activePids = useRef<Record<string, number>>({});
 
@@ -72,21 +84,41 @@ export default function CommandList() {
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [streamingCommand, setStreamingCommand] = useState<string | null>(null);
 
+  // 使用 ref 持有最新的轮询函数，避免闭包陈旧问题
+  const loadSelectedFilesRef = useRef<() => void>(loadSelectedFiles);
+  const loadSkillsRef = useRef<() => void>(loadSkills);
+  const loadRunningCountRef = useRef<() => void>(loadRunningCount);
+
+  // 每次 render 更新 ref
+  useEffect(() => {
+    loadSelectedFilesRef.current = loadSelectedFiles;
+    loadSkillsRef.current = loadSkills;
+    loadRunningCountRef.current = loadRunningCount;
+  });
+
   useEffect(() => {
     const timestamp = new Date().toISOString();
     console.log(`[CommandList] Component mounted at ${timestamp}`);
-    loadSkills();
-    loadSelectedFiles();
-    loadRunningCount();
+    loadSelectedFilesRef.current();
+    loadSkillsRef.current();
+    loadRunningCountRef.current();
+
+    // 初始化任务队列
+    initQueue();
+    setExecutor(queueExecutor);
+    restoreAndSchedule();
+    setQueuedTasks(getQueuedTasks());
 
     const interval = setInterval(() => {
-      loadRunningCount();
-      loadSkills();
+      loadRunningCountRef.current();
+      loadSkillsRef.current();
+      scheduleNext();
+      setQueuedTasks(getQueuedTasks());
     }, 5000);
 
     const fileRefreshInterval = setInterval(() => {
-      loadSelectedFiles();
-    }, 2000);
+      loadSelectedFilesRef.current();
+    }, 5000);
 
     return () => {
       clearInterval(interval);
@@ -101,6 +133,42 @@ export default function CommandList() {
       setTotalExecutions(summary.totalExecutions);
     } catch (error) {
       console.error("Failed to load running count:", error);
+    }
+  }
+
+  async function queueExecutor(task: QueuedTask) {
+    const startTime = Date.now();
+    setProcessingCommand((prev) => [...prev, { name: task.skillName }]);
+
+    try {
+      const logger = new RunLogger(task.targetFilePath || task.skillName, task.projectDir);
+      logger.logValidated();
+
+      const result = await executeClaudeCommand(
+        {
+          prompt: task.prompt,
+          workDir: task.projectDir,
+          projectDir: task.projectDir,
+          claudeBin: task.claudeBin,
+          headlessMode: true,
+        },
+        logger,
+      );
+
+      logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
+      recordExecution(task.skillName, result.success, Date.now() - startTime);
+
+      if (result.success) {
+        await showHUD(`✅ ${task.skillName} 完成 (${Math.round(result.duration / 1000)}s)`);
+      }
+    } catch (error) {
+      console.error(`[queue] ${task.skillName} error:`, error);
+      recordExecution(task.skillName, false, Date.now() - startTime);
+    } finally {
+      setProcessingCommand((prev) => prev.filter((c) => c.name !== task.skillName));
+      loadRunningCountRef.current();
+      setQueuedTasks(getQueuedTasks());
+      triggerStatusRefresh();
     }
   }
 
@@ -134,9 +202,23 @@ export default function CommandList() {
 
     try {
       const frontApp = await getFrontmostApplication();
-      const isFinder = await isFinderFrontmost();
+      const isFinder = isFinderApp(frontApp);
+      const isVSCode = isVSCodeApp(frontApp);
 
-      if (isFinder) {
+      if (isVSCode) {
+        try {
+          const vscodeFile = await getVSCodeActiveFile();
+          if (vscodeFile) {
+            filePaths = [vscodeFile];
+            if (filePaths.length > 0) source = "VS Code";
+          }
+        } catch (error) {
+          console.error(
+            "[loadSelectedFiles] Failed to get VS Code active file:",
+            error,
+          );
+        }
+      } else if (isFinder) {
         try {
           const finderItems = await getSelectedFinderItems();
           filePaths = finderItems.map((item) => item.path);
@@ -204,7 +286,7 @@ export default function CommandList() {
           message:
             selectedFiles.length > 0
               ? "已保留上次选择"
-              : "请在 Finder 或 DEVONthink 中选择文件",
+              : "请在 Finder、DEVONthink 或 VS Code 中选择文件",
         });
       }
       return;
@@ -222,8 +304,6 @@ export default function CommandList() {
           filePaths.length === 1 ? filePaths[0].split("/").pop() : undefined,
       });
     }
-
-    setRefreshKey((prev) => prev + 1);
   }
 
   /**
@@ -241,7 +321,7 @@ export default function CommandList() {
       await showToast({
         style: Toast.Style.Failure,
         title: "未选择文件",
-        message: "请在 Finder 或 DEVONthink 中选择文件后重试",
+        message: "请在 Finder、DEVONthink 或 VS Code 中选择文件后重试",
       });
       return;
     }
@@ -315,6 +395,31 @@ export default function CommandList() {
 
       // 构建 prompt: 直接使用用户输入，不加 /skillname 前缀
       const prompt = `${userPrompt} "${actualFilePath}"`;
+
+      // 并发数检查
+      const currentRunning = countRunningCommands();
+      const limit = getConcurrencyLimit();
+      if (currentRunning >= limit) {
+        setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
+        await toast.hide();
+        enqueue({
+          skillName: "free-command",
+          prompt,
+          projectDir: config.projectDirs[0],
+          claudeBin: config.claudeBin,
+          headlessMode: config.headlessMode,
+          streamingMode: config.streamingMode,
+          targetFilePath: actualFilePath,
+          note: userPrompt,
+        });
+        setQueuedTasks(getQueuedTasks());
+        await showToast({
+          style: Toast.Style.Success,
+          title: `已加入队列 (${currentRunning}/${limit})`,
+          message: "自由指令排队等待执行",
+        });
+        return;
+      }
 
       let result;
 
@@ -415,6 +520,8 @@ export default function CommandList() {
       loadRunningCount();
       loadSkills();
       triggerStatusRefresh();
+      scheduleNext();
+      setQueuedTasks(getQueuedTasks());
     }
   }
 
@@ -436,7 +543,7 @@ export default function CommandList() {
       await showToast({
         style: Toast.Style.Failure,
         title: "未选择文件",
-        message: "请在 Finder 或 DEVONthink 中选择文件后重试",
+        message: "请在 Finder、DEVONthink 或 VS Code 中选择文件后重试",
       });
       return;
     }
@@ -525,6 +632,31 @@ export default function CommandList() {
 
       if (note && note.trim()) {
         prompt += ` ${note.trim()}`;
+      }
+
+      // 并发数检查
+      const currentRunning = countRunningCommands();
+      const limit = getConcurrencyLimit();
+      if (currentRunning >= limit) {
+        setProcessingCommand((prev) => prev.filter((c) => c.name !== skill.name));
+        await toast.hide();
+        enqueue({
+          skillName: skill.name,
+          prompt,
+          projectDir: skill.projectDir || config.projectDirs[0],
+          claudeBin: config.claudeBin,
+          headlessMode: config.headlessMode,
+          streamingMode: config.streamingMode,
+          targetFilePath: actualFilePath || undefined,
+          note: note.trim() || undefined,
+        });
+        setQueuedTasks(getQueuedTasks());
+        await showToast({
+          style: Toast.Style.Success,
+          title: `已加入队列 (${currentRunning}/${limit})`,
+          message: `${skill.title} 排队等待执行`,
+        });
+        return;
       }
 
       let result;
@@ -626,6 +758,8 @@ export default function CommandList() {
       loadRunningCount();
       loadSkills();
       triggerStatusRefresh();
+      scheduleNext();
+      setQueuedTasks(getQueuedTasks());
     }
   }
 
@@ -752,7 +886,7 @@ export default function CommandList() {
         >
           {(showAllFiles ? selectedFiles : selectedFiles.slice(0, 3)).map((file, index) => (
             <ListItem
-              key={`${file}-${index}-${refreshKey}`}
+              key={`${file}-${index}`}
               id={`file-${index}`}
               title={file.split("/").pop() || file}
               subtitle={file}
@@ -806,14 +940,14 @@ export default function CommandList() {
               ? selectedFiles.length === 1
                 ? `将对 "${selectedFiles[0].split("/").pop() || selectedFiles[0]}" 执行`
                 : `将对 ${selectedFiles.length} 个文件执行`
-              : "请先在 DEVONthink 或 Finder 中选择文件"
+              : "请先在 DEVONthink、Finder 或 VS Code 中选择文件"
           }
         >
-          {runningCount > 0 && (
+          {(runningCount > 0 || queuedTasks.length > 0) && (
             <ListItem
               id="running-indicator"
-              title={`🟢 ${runningCount} 个 Agent 正在运行`}
-              subtitle={`累计已执行 ${totalExecutions} 次`}
+              title={`🟢 ${runningCount} 个 Agent 运行中${queuedTasks.length > 0 ? `，${queuedTasks.length} 个排队中` : ""}`}
+              subtitle={`累计已执行 ${totalExecutions} 次 · 并发上限 ${getConcurrencyLimit()}`}
               icon={Icon.CircleProgress}
               actions={
                 <ActionPanel>
@@ -827,25 +961,6 @@ export default function CommandList() {
               }
             />
           )}
-          {runningCount === 0 && totalExecutions > 0 && (
-            <ListItem
-              id="stats-indicator"
-              title={`📊 累计执行 ${totalExecutions} 次`}
-              subtitle="查看运行状态与历史"
-              icon={Icon.BarChart}
-              actions={
-                <ActionPanel>
-                  <Action.Push
-                    title="查看Agent 运行状态"
-                    target={<StatusList />}
-                    icon={Icon.List}
-                    shortcut={{ modifiers: ["cmd"], key: "s" }}
-                  />
-                </ActionPanel>
-              }
-            />
-          )}
-
           {/* 自由指令入口 - 始终显示（当有文件选中时） */}
           {selectedFiles.length > 0 && (
             <ListItem
@@ -891,7 +1006,9 @@ export default function CommandList() {
             />
           )}
 
-          {items.map((skill) => (
+          {items.map((skill) => {
+            const queuedItem = queuedTasks.find((t) => t.skillName === skill.name);
+            return (
             <ListItem
               key={skill.skillDir}
               id={skill.skillDir}
@@ -899,14 +1016,16 @@ export default function CommandList() {
               subtitle={skill.description}
               icon={skill.icon}
               accessories={[
-                {
-                  text:
-                    processingCommand.some((c) => c.name === skill.name) ? "执行中..." : undefined,
-                  icon:
-                    processingCommand.some((c) => c.name === skill.name)
-                      ? Icon.CircleProgress
-                      : undefined,
-                },
+                (() => {
+                  if (processingCommand.some((c) => c.name === skill.name)) {
+                    return { text: "执行中...", icon: Icon.CircleProgress };
+                  }
+                  if (queuedItem) {
+                    const pos = queuedTasks.indexOf(queuedItem) + 1;
+                    return { text: `队列 #${pos}`, icon: Icon.Clock };
+                  }
+                  return null;
+                })(),
                 skill.pinned ? { text: "置顶", icon: Icon.Pin } : null,
                 skill.isNew && !skill.pinned
                   ? { text: "新", icon: Icon.Star }
@@ -930,8 +1049,10 @@ export default function CommandList() {
                         const pid = activePids.current[skill.name];
                         if (pid) {
                           try {
-                            execSync(`kill ${pid}`, { stdio: "ignore" });
-                          } catch {}
+                            process.kill(pid, "SIGTERM");
+                          } catch (error) {
+                            console.error(`Failed to kill process ${pid}:`, error);
+                          }
                         }
                         setProcessingCommand((prev) =>
                           prev.filter((c) => c.name !== skill.name),
@@ -939,6 +1060,17 @@ export default function CommandList() {
                       }}
                       icon={Icon.XMarkCircle}
                       shortcut={{ modifiers: ["cmd", "shift"], key: "k" }}
+                    />
+                  )}
+                  {queuedItem && (
+                    <Action
+                      title="取消排队"
+                      onAction={() => {
+                        dequeue(queuedItem.id);
+                        setQueuedTasks(getQueuedTasks());
+                      }}
+                      icon={Icon.XMarkCircle}
+                      shortcut={{ modifiers: ["ctrl"], key: "x" }}
                     />
                   )}
                   {note && note.trim() && (
@@ -970,7 +1102,8 @@ export default function CommandList() {
                 </ActionPanel>
               }
             />
-          ))}
+          );
+          })}
         </List.Section>
       )}
     </List>

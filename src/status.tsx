@@ -22,6 +22,7 @@ import { join } from "path";
 import { JSONL_LOG, LOG_DIR, formatLocalTime } from "./utils/logger";
 import { GlobalStatsItem } from "./components/StatsComponents";
 import { useStatusRefresh } from "./contexts/StatusRefreshContext";
+import { getQueuedTasks, dequeue, QueuedTask } from "./utils/taskQueue";
 
 export default function StatusList() {
   const [runs, setRuns] = useState<{
@@ -31,14 +32,17 @@ export default function StatusList() {
   }>({ running: [], completed: [], failed: [] });
   const [isLoading, setIsLoading] = useState(true);
   const [tick, setTick] = useState(0); // 用于触发运行中任务的时长更新
+  const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
   const { version } = useStatusRefresh();
 
   useEffect(() => {
     loadStatus();
+    setQueuedTasks(getQueuedTasks());
 
     // 每 5 秒刷新一次状态
     const interval = setInterval(() => {
       loadStatus();
+      setQueuedTasks(getQueuedTasks());
     }, 5000);
 
     // 每 1 秒更新一次运行中任务的已用时长显示
@@ -343,6 +347,38 @@ export default function StatusList() {
       {runs.running.length > 0 && (
         <List.Section title={`🔄 运行中 (${runs.running.length})`}>
           {runs.running.map(renderRunItem)}
+        </List.Section>
+      )}
+
+      {/* 排队中 */}
+      {queuedTasks.length > 0 && (
+        <List.Section title={`⏳ 排队中 (${queuedTasks.length})`}>
+          {queuedTasks.map((task, index) => (
+            <ListItem
+              key={task.id}
+              id={task.id}
+              title={task.skillName}
+              subtitle={task.targetFilePath ? task.targetFilePath.split("/").pop() : undefined}
+              icon={Icon.Clock}
+              accessories={[
+                { text: `#${index + 1}` },
+                { text: formatDateTime(new Date(task.queuedAt)) },
+              ]}
+              actions={
+                <ActionPanel>
+                  <Action
+                    title="取消排队"
+                    onAction={() => {
+                      dequeue(task.id);
+                      setQueuedTasks(getQueuedTasks());
+                    }}
+                    icon={Icon.XMarkCircle}
+                    shortcut={{ modifiers: ["cmd"], key: "k" }}
+                  />
+                </ActionPanel>
+              }
+            />
+          ))}
         </List.Section>
       )}
 

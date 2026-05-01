@@ -91,6 +91,21 @@
       "title": "流式输出模式",
       "description": "实时显示 Claude 的输出（类似 SkillLauncher）",
       "default": false
+    },
+    {
+      "name": "concurrencyLimit",
+      "type": "dropdown",
+      "required": false,
+      "title": "最大并发数",
+      "description": "同时运行的最大 Agent 数量，超出部分排队等待",
+      "default": "5",
+      "data": [
+        { "title": "1（串行）", "value": "1" },
+        { "title": "3", "value": "3" },
+        { "title": "5（推荐）", "value": "5" },
+        { "title": "10", "value": "10" },
+        { "title": "15", "value": "15" }
+      ]
     }
   ],
   "dependencies": {
