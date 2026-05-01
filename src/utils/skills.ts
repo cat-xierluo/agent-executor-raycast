@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, existsSync, lstatSync } from "fs";
-import { join } from "path";
+import { readdirSync, readFileSync, existsSync, lstatSync, symlinkSync, mkdirSync } from "fs";
+import { join, basename, resolve } from "path";
 import { Icon } from "@raycast/api";
 import { getProjectName } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
@@ -26,17 +26,21 @@ export interface ClaudeSkill {
 
 /**
  * 检查目录是否是有效的 skill 目录
- * 有效条件：
- * 1. 包含 skill.md 或 SKILL.md
- * 2. 或包含 .claude 子目录
+ * 有效条件（满足任一）：
+ * 1. 根目录包含 skill.md 或 SKILL.md
+ * 2. .claude 子目录下包含 skill.md 或 SKILL.md
  */
-function isValidSkillDir(skillPath: string): boolean {
+export function isValidSkillDir(skillPath: string): boolean {
   const skillMd = join(skillPath, "skill.md");
   const skillMdUpper = join(skillPath, "SKILL.md");
-  const claudeDir = join(skillPath, ".claude");
+  const claudeSkillMd = join(skillPath, ".claude", "skill.md");
+  const claudeSkillMdUpper = join(skillPath, ".claude", "SKILL.md");
 
   return (
-    existsSync(skillMd) || existsSync(skillMdUpper) || existsSync(claudeDir)
+    existsSync(skillMd) ||
+    existsSync(skillMdUpper) ||
+    existsSync(claudeSkillMd) ||
+    existsSync(claudeSkillMdUpper)
   );
 }
 
@@ -362,4 +366,38 @@ function getSkillIcon(name: string): Icon {
  */
 export function readSkillContent(skillFile: string): string {
   return readFileSync(skillFile, "utf-8");
+}
+
+/**
+ * 导入外部 Skill 目录（创建符号链接）
+ */
+export function importSkill(sourceDir: string, targetProjectDir: string): { success: boolean; message: string } {
+  const resolvedSource = resolve(sourceDir);
+  const resolvedTarget = resolve(targetProjectDir);
+  const skillName = basename(resolvedSource);
+  const skillsDir = join(resolvedTarget, ".claude/skills");
+  const targetPath = join(skillsDir, skillName);
+
+  if (!isValidSkillDir(resolvedSource)) {
+    return { success: false, message: "所选目录不是有效的 Skill（缺少 skill.md 或 .claude 目录）" };
+  }
+
+  if (existsSync(targetPath)) {
+    return { success: false, message: `Skill "${skillName}" 已存在于目标项目中` };
+  }
+
+  // 确保 .claude/skills/ 目录存在
+  mkdirSync(skillsDir, { recursive: true });
+
+  try {
+    symlinkSync(resolvedSource, targetPath);
+  } catch (error) {
+    return {
+      success: false,
+      message: `创建符号链接失败: ${error instanceof Error ? error.message : "未知错误"}`,
+    };
+  }
+
+  invalidateSkillsCache();
+  return { success: true, message: `Skill "${skillName}" 导入成功` };
 }

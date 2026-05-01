@@ -40,6 +40,7 @@ import { countRunningCommands } from "./utils/status";
 import { recordExecution, getGlobalSummary } from "./utils/stats";
 import StatusList from "./status";
 import { triggerStatusRefresh } from "./contexts/StatusRefreshContext";
+import ImportSkill from "./import-skill";
 import {
   initQueue,
   enqueue,
@@ -858,6 +859,12 @@ export default function CommandList() {
             icon={Icon.Gear}
             shortcut={{ modifiers: ["cmd"], key: "," }}
           />
+          <Action.Push
+            title="导入 Skill"
+            target={<ImportSkill />}
+            icon={Icon.Download}
+            shortcut={{ modifiers: ["cmd"], key: "i" }}
+          />
           {note && note.trim() && (
             <Action
               title="清空附加留言"
@@ -961,6 +968,44 @@ export default function CommandList() {
               }
             />
           )}
+          {runningCount === 0 && totalExecutions > 0 && (
+            <ListItem
+              id="stats-indicator"
+              title={`📊 累计执行 ${totalExecutions} 次`}
+              subtitle="查看运行状态与历史"
+              icon={Icon.BarChart}
+              actions={
+                <ActionPanel>
+                  <Action.Push
+                    title="查看Agent 运行状态"
+                    target={<StatusList />}
+                    icon={Icon.List}
+                    shortcut={{ modifiers: ["cmd"], key: "s" }}
+                  />
+                </ActionPanel>
+              }
+            />
+          )}
+
+          {/* 导入 Skill 入口 */}
+          <ListItem
+            id="import-skill"
+            title="📥 导入 Skill"
+            subtitle="从外部目录导入 Skill（创建符号链接）"
+            icon={Icon.Download}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  title="导入 Skill"
+                  target={<ImportSkill />}
+                  icon={Icon.Download}
+                  shortcut={{ modifiers: ["cmd"], key: "i" }}
+                />
+              </ActionPanel>
+            }
+          />
+
+
           {/* 自由指令入口 - 始终显示（当有文件选中时） */}
           {selectedFiles.length > 0 && (
             <ListItem
