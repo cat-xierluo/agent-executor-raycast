@@ -379,7 +379,7 @@ export function importSkill(sourceDir: string, targetProjectDir: string): { succ
   const targetPath = join(skillsDir, skillName);
 
   if (!isValidSkillDir(resolvedSource)) {
-    return { success: false, message: "所选目录不是有效的 Skill（缺少 skill.md 或 .claude 目录）" };
+    return { success: false, message: "所选目录不是有效的 Skill（缺少 skill.md）" };
   }
 
   if (existsSync(targetPath)) {

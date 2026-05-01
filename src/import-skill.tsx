@@ -30,7 +30,7 @@ export default function ImportSkill() {
     }
 
     if (!isValid) {
-      await showToast({ style: Toast.Style.Failure, title: "所选目录不是有效的 Skill" });
+      await showToast({ style: Toast.Style.Failure, title: "所选目录不是有效的 Skill（缺少 skill.md）" });
       return;
     }
 
