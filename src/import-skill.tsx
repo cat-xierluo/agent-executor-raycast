@@ -1,6 +1,6 @@
-import { Form, showToast, Toast, ActionPanel, Action, Icon } from "@raycast/api";
+import { Form, showToast, Toast, ActionPanel, Action, Icon, openCommandPreferences } from "@raycast/api";
 import { useState, useEffect } from "react";
-import { isValidSkillDir, importSkill, invalidateSkillsCache } from "./utils/skills";
+import { isValidSkillDir, importSkill } from "./utils/skills";
 import { getConfig } from "./utils/claude";
 
 export default function ImportSkill() {
@@ -21,6 +21,7 @@ export default function ImportSkill() {
 
   const selectedPath = sourceDir[0] || "";
   const isValid = selectedPath ? isValidSkillDir(selectedPath) : null;
+  const noProjectDirs = projectDirs.length === 0;
 
   async function handleSubmit() {
     if (!selectedPath) {
@@ -47,6 +48,20 @@ export default function ImportSkill() {
     }
   }
 
+  if (noProjectDirs) {
+    return (
+      <Form
+        actions={
+          <ActionPanel>
+            <Action title="打开扩展设置" onAction={openCommandPreferences} icon={Icon.Gear} />
+          </ActionPanel>
+        }
+      >
+        <Form.Description text="⚠️ 未配置项目目录。请在扩展设置中至少配置一个项目目录后再导入 Skill。" />
+      </Form>
+    );
+  }
+
   return (
     <Form
       actions={
@@ -61,10 +76,10 @@ export default function ImportSkill() {
         canChooseDirectories
         allowMultipleSelection={false}
         onChange={setSourceDir}
-        info="选择包含 skill.md 或 .claude 子目录的目录"
+        info="选择包含 skill.md 的目录"
       />
       {selectedPath && isValid === false && (
-        <Form.Description text="⚠️ 所选目录不是有效的 Skill（缺少 skill.md 或 .claude 目录）" />
+        <Form.Description text="⚠️ 所选目录不是有效的 Skill（缺少 skill.md）" />
       )}
       {selectedPath && isValid === true && (
         <Form.Description text="✅ 有效的 Skill 目录" />

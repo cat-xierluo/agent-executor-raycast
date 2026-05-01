@@ -1,5 +1,5 @@
 import { readdirSync, readFileSync, existsSync, lstatSync, symlinkSync, mkdirSync } from "fs";
-import { join, basename } from "path";
+import { join, basename, resolve } from "path";
 import { Icon } from "@raycast/api";
 import { getProjectName } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
@@ -26,17 +26,21 @@ export interface ClaudeSkill {
 
 /**
  * 检查目录是否是有效的 skill 目录
- * 有效条件：
- * 1. 包含 skill.md 或 SKILL.md
- * 2. 或包含 .claude 子目录
+ * 有效条件（满足任一）：
+ * 1. 根目录包含 skill.md 或 SKILL.md
+ * 2. .claude 子目录下包含 skill.md 或 SKILL.md
  */
 export function isValidSkillDir(skillPath: string): boolean {
   const skillMd = join(skillPath, "skill.md");
   const skillMdUpper = join(skillPath, "SKILL.md");
-  const claudeDir = join(skillPath, ".claude");
+  const claudeSkillMd = join(skillPath, ".claude", "skill.md");
+  const claudeSkillMdUpper = join(skillPath, ".claude", "SKILL.md");
 
   return (
-    existsSync(skillMd) || existsSync(skillMdUpper) || existsSync(claudeDir)
+    existsSync(skillMd) ||
+    existsSync(skillMdUpper) ||
+    existsSync(claudeSkillMd) ||
+    existsSync(claudeSkillMdUpper)
   );
 }
 
@@ -329,11 +333,13 @@ export function readSkillContent(skillFile: string): string {
  * 导入外部 Skill 目录（创建符号链接）
  */
 export function importSkill(sourceDir: string, targetProjectDir: string): { success: boolean; message: string } {
-  const skillName = basename(sourceDir);
-  const skillsDir = join(targetProjectDir, ".claude/skills");
+  const resolvedSource = resolve(sourceDir);
+  const resolvedTarget = resolve(targetProjectDir);
+  const skillName = basename(resolvedSource);
+  const skillsDir = join(resolvedTarget, ".claude/skills");
   const targetPath = join(skillsDir, skillName);
 
-  if (!isValidSkillDir(sourceDir)) {
+  if (!isValidSkillDir(resolvedSource)) {
     return { success: false, message: "所选目录不是有效的 Skill（缺少 skill.md 或 .claude 目录）" };
   }
 
@@ -345,7 +351,7 @@ export function importSkill(sourceDir: string, targetProjectDir: string): { succ
   mkdirSync(skillsDir, { recursive: true });
 
   try {
-    symlinkSync(sourceDir, targetPath);
+    symlinkSync(resolvedSource, targetPath);
   } catch (error) {
     return {
       success: false,
