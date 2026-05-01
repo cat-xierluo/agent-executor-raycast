@@ -39,6 +39,7 @@ import { countRunningCommands } from "./utils/status";
 import { recordExecution, getGlobalSummary } from "./utils/stats";
 import StatusList from "./status";
 import { triggerStatusRefresh } from "./contexts/StatusRefreshContext";
+import ImportSkill from "./import-skill";
 
 // 不需要文件的 Skill 名称列表（兼容层）
 const SKILLS_NO_FILE_REQUIRED = ["deepresearch", "sync-external"];
@@ -724,6 +725,12 @@ export default function CommandList() {
             icon={Icon.Gear}
             shortcut={{ modifiers: ["cmd"], key: "," }}
           />
+          <Action.Push
+            title="导入 Skill"
+            target={<ImportSkill />}
+            icon={Icon.Download}
+            shortcut={{ modifiers: ["cmd"], key: "i" }}
+          />
           {note && note.trim() && (
             <Action
               title="清空附加留言"
@@ -845,6 +852,24 @@ export default function CommandList() {
               }
             />
           )}
+
+          {/* 导入 Skill 入口 */}
+          <ListItem
+            id="import-skill"
+            title="📥 导入 Skill"
+            subtitle="从外部目录导入 Skill（创建符号链接）"
+            icon={Icon.Download}
+            actions={
+              <ActionPanel>
+                <Action.Push
+                  title="导入 Skill"
+                  target={<ImportSkill />}
+                  icon={Icon.Download}
+                  shortcut={{ modifiers: ["cmd"], key: "i" }}
+                />
+              </ActionPanel>
+            }
+          />
 
           {/* 自由指令入口 - 始终显示（当有文件选中时） */}
           {selectedFiles.length > 0 && (

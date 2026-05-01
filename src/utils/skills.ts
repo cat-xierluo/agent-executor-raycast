@@ -1,5 +1,5 @@
-import { readdirSync, readFileSync, existsSync, lstatSync } from "fs";
-import { join } from "path";
+import { readdirSync, readFileSync, existsSync, lstatSync, symlinkSync, mkdirSync } from "fs";
+import { join, basename } from "path";
 import { Icon } from "@raycast/api";
 import { getProjectName } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
@@ -30,7 +30,7 @@ export interface ClaudeSkill {
  * 1. 包含 skill.md 或 SKILL.md
  * 2. 或包含 .claude 子目录
  */
-function isValidSkillDir(skillPath: string): boolean {
+export function isValidSkillDir(skillPath: string): boolean {
   const skillMd = join(skillPath, "skill.md");
   const skillMdUpper = join(skillPath, "SKILL.md");
   const claudeDir = join(skillPath, ".claude");
@@ -323,4 +323,36 @@ function getSkillIcon(name: string): Icon {
  */
 export function readSkillContent(skillFile: string): string {
   return readFileSync(skillFile, "utf-8");
+}
+
+/**
+ * 导入外部 Skill 目录（创建符号链接）
+ */
+export function importSkill(sourceDir: string, targetProjectDir: string): { success: boolean; message: string } {
+  const skillName = basename(sourceDir);
+  const skillsDir = join(targetProjectDir, ".claude/skills");
+  const targetPath = join(skillsDir, skillName);
+
+  if (!isValidSkillDir(sourceDir)) {
+    return { success: false, message: "所选目录不是有效的 Skill（缺少 skill.md 或 .claude 目录）" };
+  }
+
+  if (existsSync(targetPath)) {
+    return { success: false, message: `Skill "${skillName}" 已存在于目标项目中` };
+  }
+
+  // 确保 .claude/skills/ 目录存在
+  mkdirSync(skillsDir, { recursive: true });
+
+  try {
+    symlinkSync(sourceDir, targetPath);
+  } catch (error) {
+    return {
+      success: false,
+      message: `创建符号链接失败: ${error instanceof Error ? error.message : "未知错误"}`,
+    };
+  }
+
+  invalidateSkillsCache();
+  return { success: true, message: `Skill "${skillName}" 导入成功` };
 }
