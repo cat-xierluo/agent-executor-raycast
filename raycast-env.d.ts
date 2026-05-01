@@ -25,7 +25,9 @@ type ExtensionPreferences = {
   /** 启用默认 Skills 目录 - 自动扫描 ~/.claude/skills/ 目录中的 Skills */
   "enableDefaultSkills": boolean,
   /** 流式输出模式 - 实时显示 Claude 的输出（类似 SkillLauncher） */
-  "streamingMode": boolean
+  "streamingMode": boolean,
+  /** 最大并发数 - 同时运行的最大 Agent 数量，超出部分排队等待 */
+  "concurrencyLimit": "1" | "3" | "5" | "10" | "15"
 }
 
 /** Preferences accessible in all the extension's commands */

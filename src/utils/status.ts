@@ -557,7 +557,15 @@ export function filterRecentEntries(runs: RunInfo[], days: number): RunInfo[] {
 /**
  * 统计正在运行的命令数量
  */
+let runningCountCache = 0;
+let runningCountCacheTime = 0;
+const RUNNING_COUNT_CACHE_TTL = 5000;
+
 export function countRunningCommands(): number {
+  if (Date.now() - runningCountCacheTime < RUNNING_COUNT_CACHE_TTL) {
+    return runningCountCache;
+  }
+
   const entries = readLogEntries();
   const grouped = groupLogsByRunId(entries);
   const { running } = categorizeRuns(grouped);
@@ -566,7 +574,10 @@ export function countRunningCommands(): number {
   const oneHourAgo = new Date();
   oneHourAgo.setHours(oneHourAgo.getHours() - 1);
 
-  return running.filter((run) => run.startTime >= oneHourAgo).length;
+  const count = running.filter((run) => run.startTime >= oneHourAgo).length;
+  runningCountCache = count;
+  runningCountCacheTime = Date.now();
+  return count;
 }
 
 /**

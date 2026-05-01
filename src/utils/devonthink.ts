@@ -1,5 +1,21 @@
-import { execSync } from "child_process";
+import { exec } from "child_process";
+import { readFileSync, statSync } from "fs";
+import { join as pathJoin } from "path";
 import { showToast, Toast } from "@raycast/api";
+import { homedir } from "os";
+
+// 异步执行 shell 命令，避免阻塞事件循环
+function execAsync(command: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    exec(command, { encoding: "utf-8" }, (error, stdout) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
+}
 
 // 支持的 DevonThink 版本
 const DEVONTHINK_BUNDLE_IDS = [
@@ -8,13 +24,19 @@ const DEVONTHINK_BUNDLE_IDS = [
   "com.devon-technologies.think2", // DevonThink 2
 ];
 
+// DevonThink bundle ID 缓存（会话级别）
+let cachedBundleId: string | null = null;
+
 // 获取当前运行的 DevonThink 的 bundle ID
-function getDevonThinkBundleId(): string {
+async function getDevonThinkBundleId(): Promise<string> {
+  if (cachedBundleId) return cachedBundleId;
+
   for (const bundleId of DEVONTHINK_BUNDLE_IDS) {
     try {
-      execSync(`osascript -e 'tell application id "${bundleId}" to get name'`, {
-        stdio: ["ignore", "pipe", "ignore"],
-      });
+      await execAsync(
+        `osascript -e 'tell application id "${bundleId}" to get name'`,
+      );
+      cachedBundleId = bundleId;
       return bundleId;
     } catch {
       // 继续尝试下一个
@@ -42,7 +64,7 @@ export async function getSelectedDevonThinkRecords(): Promise<
   // 获取当前运行的 DevonThink 的 bundle ID
   let bundleId: string;
   try {
-    bundleId = getDevonThinkBundleId();
+    bundleId = await getDevonThinkBundleId();
   } catch (error) {
     throw new Error("DEVONthink 未运行，请先启动 DEVONthink");
   }
@@ -109,12 +131,9 @@ export async function getSelectedDevonThinkRecords(): Promise<
   `;
 
   try {
-    const result = execSync(
+    const result = await execAsync(
       `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
-      {
-        encoding: "utf-8",
-      },
-    ).trim();
+    );
 
     // 检查是否有错误
     if (result.startsWith("Error:")) {
@@ -168,7 +187,7 @@ export async function getSelectedDevonThinkRecords(): Promise<
  */
 export async function checkDevonThinkAvailable(): Promise<boolean> {
   try {
-    getDevonThinkBundleId();
+    await getDevonThinkBundleId();
     return true;
   } catch {
     return false;
@@ -176,7 +195,7 @@ export async function checkDevonThinkAvailable(): Promise<boolean> {
 }
 
 /**
- * 获取当前前台应用的 bundle ID
+ * 获取当前前台应用的名称
  * 用于智能判断应该使用哪个来源的文件选择
  */
 export async function getFrontmostApplication(): Promise<string> {
@@ -188,12 +207,9 @@ export async function getFrontmostApplication(): Promise<string> {
       end tell
     `;
 
-    const result = execSync(
+    const result = await execAsync(
       `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
-      {
-        encoding: "utf-8",
-      },
-    ).trim();
+    );
 
     return result;
   } catch (error) {
@@ -203,14 +219,70 @@ export async function getFrontmostApplication(): Promise<string> {
 }
 
 /**
- * 检查 Finder 是否是当前前台应用
+ * 判断应用名是否为 Finder
+ */
+export function isFinderApp(appName: string): boolean {
+  return appName === "Finder";
+}
+
+/**
+ * 判断应用名是否为 VS Code
+ */
+export function isVSCodeApp(appName: string): boolean {
+  return appName === "Code" || appName === "Visual Studio Code";
+}
+
+/**
+ * 检查 Finder 是否是当前前台应用（保留兼容性）
  */
 export async function isFinderFrontmost(): Promise<boolean> {
   try {
     const frontApp = await getFrontmostApplication();
-    return frontApp === "Finder";
+    return isFinderApp(frontApp);
   } catch {
     return false;
+  }
+}
+
+/**
+ * 检查 VS Code 是否是当前前台应用（保留兼容性）
+ */
+export async function isVSCodeFrontmost(): Promise<boolean> {
+  try {
+    const frontApp = await getFrontmostApplication();
+    return isVSCodeApp(frontApp);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 获取 VS Code 当前活动窗口打开的文件路径
+ * 通过读取 ~/.vscode-active-file 文件（由 VS Code 扩展写入）
+ */
+export async function getVSCodeActiveFile(): Promise<string | null> {
+  try {
+    const homeDir = process.env.HOME || homedir();
+    const filePath = pathJoin(homeDir, ".vscode-active-file");
+
+    // 检查文件是否存在
+    try {
+      statSync(filePath);
+    } catch {
+      return null; // 文件不存在
+    }
+
+    // 读取文件内容
+    const content = readFileSync(filePath, "utf-8").trim();
+
+    if (!content || content === "") {
+      return null;
+    }
+
+    return content;
+  } catch (error) {
+    console.error("Failed to get VS Code active file:", error);
+    return null;
   }
 }
 
@@ -239,7 +311,7 @@ export async function exportDevonThinkRecordToTemp(
     throw new Error("该记录没有 reference URL");
   }
 
-  const bundleId = getDevonThinkBundleId();
+  const bundleId = await getDevonThinkBundleId();
   const tempDir = `/tmp/autoweave-devonthink`;
   const appleScript = `
     tell application id "${bundleId}"
@@ -264,14 +336,11 @@ export async function exportDevonThinkRecordToTemp(
 
   try {
     // 确保临时目录存在
-    execSync(`mkdir -p "${tempDir}"`, { encoding: "utf-8" });
+    await execAsync(`mkdir -p "${tempDir}"`);
 
-    const result = execSync(
+    const result = await execAsync(
       `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
-      {
-        encoding: "utf-8",
-      },
-    ).trim();
+    );
 
     if (result.startsWith("Error:")) {
       throw new Error(result.replace("Error: ", ""));

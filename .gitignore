@@ -3,6 +3,7 @@ dist
 .env
 *.log
 .DS_Store
+settings.json
 
 # Ignore all log files and directories
 logs/*.jsonl
@@ -10,10 +11,6 @@ logs/*.log
 logs/*.txt
 logs/*.json
 logs/*.sh
-
-# Ignore auto-generated CLAUDE.md files
-CLAUDE.md
-**/CLAUDE.md
 
 # Ignore Claude Code project settings (contains API keys)
 .claude/settings.json
