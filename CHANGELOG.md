@@ -2,6 +2,24 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [0.9.0] - 2026-05-04
+
+### 新增 (Added)
+
+- **Skill 导入支持 URL 和本地路径**：导入表单新增地址栏，支持直接输入地址导入 Skill
+  - 本地路径（如 `~/skills/my-skill`）：直接创建符号链接到目标项目
+  - GitHub 仓库链接（如 `https://github.com/user/repo`）：自动 clone 仓库后创建符号链接
+  - 支持 GitHub 子路径链接（如 `https://github.com/user/repo/tree/main/.claude/skills/my-skill`）
+  - 文件选择器作为备选方式保留，地址栏输入优先
+
+- **独立「导入 Skill」命令**：新增独立的 Raycast 命令入口
+  - 可直接从 Raycast 命令面板访问「导入 Skill」
+  - 不再仅限于 Agent Executor 页面内部进入
+
+### 变更 (Changed)
+
+- **移除 Agent Executor 页面中的导入入口**：导入 Skill 不再作为 Agent Executor 列表的一个选项，统一通过独立命令访问
+
 ## [0.8.0] - 2026-05-01
 
 ### 新增 (Added)
