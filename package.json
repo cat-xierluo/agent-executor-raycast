@@ -18,6 +18,12 @@
       "mode": "view"
     },
     {
+      "name": "import-skill",
+      "title": "导入 Skill",
+      "description": "从本地目录或 URL 链接导入 Skill",
+      "mode": "view"
+    },
+    {
       "name": "status",
       "title": "Agent 运行状态",
       "description": "查看技能执行历史、运行状态和统计信息",

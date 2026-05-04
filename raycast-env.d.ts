@@ -36,6 +36,8 @@ declare type Preferences = ExtensionPreferences
 declare namespace Preferences {
   /** Preferences accessible in the `commands` command */
   export type Commands = ExtensionPreferences & {}
+  /** Preferences accessible in the `import-skill` command */
+  export type ImportSkill = ExtensionPreferences & {}
   /** Preferences accessible in the `status` command */
   export type Status = ExtensionPreferences & {}
 }
@@ -43,6 +45,8 @@ declare namespace Preferences {
 declare namespace Arguments {
   /** Arguments passed to the `commands` command */
   export type Commands = {}
+  /** Arguments passed to the `import-skill` command */
+  export type ImportSkill = {}
   /** Arguments passed to the `status` command */
   export type Status = {}
 }

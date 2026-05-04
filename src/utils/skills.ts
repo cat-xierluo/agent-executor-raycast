@@ -1,6 +1,8 @@
-import { readdirSync, readFileSync, existsSync, lstatSync, symlinkSync, mkdirSync } from "fs";
-import { join, basename, resolve } from "path";
+import { readdirSync, readFileSync, existsSync, lstatSync, symlinkSync, mkdirSync, rmSync, cpSync } from "fs";
+import { join, basename, resolve, dirname } from "path";
 import { Icon } from "@raycast/api";
+import { execSync } from "child_process";
+import { homedir } from "os";
 import { getProjectName } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
 import { readStats } from "./stats";
@@ -400,4 +402,178 @@ export function importSkill(sourceDir: string, targetProjectDir: string): { succ
 
   invalidateSkillsCache();
   return { success: true, message: `Skill "${skillName}" 导入成功` };
+}
+
+/**
+ * 解析 GitHub URL，提取 repo 地址和子路径
+ */
+function parseGitHubUrl(url: string): { repoUrl: string; subPath: string; branch: string } | null {
+  // https://github.com/user/repo/tree/branch/path/to/skill
+  const treeMatch = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/tree\/([^/]+)\/?(.*)$/);
+  if (treeMatch) {
+    return {
+      repoUrl: `https://github.com/${treeMatch[1]}.git`,
+      branch: treeMatch[2],
+      subPath: treeMatch[3] || "",
+    };
+  }
+  // https://github.com/user/repo
+  const repoMatch = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/?$/);
+  if (repoMatch) {
+    return {
+      repoUrl: `https://github.com/${repoMatch[1]}.git`,
+      branch: "main",
+      subPath: "",
+    };
+  }
+  return null;
+}
+
+/**
+ * 扫描目录寻找所有包含 skill.md 的子目录
+ */
+function findSkillDirs(rootDir: string): string[] {
+  const results: string[] = [];
+  const maxDepth = 4;
+
+  function walk(dir: string, depth: number) {
+    if (depth > maxDepth) return;
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.name.startsWith(".") && depth === 0 && entry.name !== ".claude") continue;
+        if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+
+        const fullPath = join(dir, entry.name);
+        if (isValidSkillDir(fullPath)) {
+          results.push(fullPath);
+        }
+        if (depth < maxDepth) {
+          walk(fullPath, depth + 1);
+        }
+      }
+    } catch {
+      // skip unreadable dirs
+    }
+  }
+
+  walk(rootDir, 0);
+  return results;
+}
+
+const EXTERNAL_SKILLS_DIR = join(homedir(), ".claude", "external-skills");
+
+/**
+ * 从 URL 导入 Skill（git clone 后创建符号链接）
+ */
+export async function importSkillFromUrl(
+  url: string,
+  targetProjectDir: string,
+): Promise<{ success: boolean; message: string }> {
+  const trimmedUrl = url.trim();
+  const parsed = parseGitHubUrl(trimmedUrl);
+  const resolvedTarget = resolve(targetProjectDir);
+
+  if (!parsed) {
+    return { success: false, message: "不支持的 URL 格式。请输入 GitHub 仓库链接。" };
+  }
+
+  // 从 repo URL 提取仓库名
+  const repoName = basename(parsed.repoUrl, ".git");
+  const cloneDest = join(EXTERNAL_SKILLS_DIR, repoName);
+
+  // 确保外部 skills 管理目录存在
+  mkdirSync(EXTERNAL_SKILLS_DIR, { recursive: true });
+
+  try {
+    // 如果之前 clone 过，先删除
+    if (existsSync(cloneDest)) {
+      rmSync(cloneDest, { recursive: true, force: true });
+    }
+
+    // Clone 仓库
+    execSync(`git clone --depth 1 --branch ${parsed.branch} ${parsed.repoUrl} "${cloneDest}"`, {
+      timeout: 60000,
+      stdio: "pipe",
+    });
+  } catch (error) {
+    // 如果指定分支失败，尝试默认 clone
+    try {
+      if (existsSync(cloneDest)) {
+        rmSync(cloneDest, { recursive: true, force: true });
+      }
+      execSync(`git clone --depth 1 ${parsed.repoUrl} "${cloneDest}"`, {
+        timeout: 60000,
+        stdio: "pipe",
+      });
+    } catch {
+      return { success: false, message: "克隆仓库失败，请检查 URL 是否正确" };
+    }
+  }
+
+  // 确定要导入的 skill 目录
+  let skillSourceDirs: string[];
+
+  if (parsed.subPath) {
+    const specificPath = join(cloneDest, parsed.subPath);
+    if (isValidSkillDir(specificPath)) {
+      skillSourceDirs = [specificPath];
+    } else {
+      // 子路径不是有效 skill，扫描该路径下的 skill
+      skillSourceDirs = findSkillDirs(specificPath);
+    }
+  } else {
+    // 未指定子路径，扫描整个仓库
+    skillSourceDirs = findSkillDirs(cloneDest);
+  }
+
+  if (skillSourceDirs.length === 0) {
+    rmSync(cloneDest, { recursive: true, force: true });
+    return { success: false, message: "仓库中未找到有效的 Skill（缺少 skill.md）" };
+  }
+
+  // 导入找到的所有 skill
+  const skillsDir = join(resolvedTarget, ".claude/skills");
+  mkdirSync(skillsDir, { recursive: true });
+
+  const results: string[] = [];
+  for (const skillDir of skillSourceDirs) {
+    const skillName = basename(skillDir);
+    const targetPath = join(skillsDir, skillName);
+
+    if (existsSync(targetPath)) {
+      results.push(`"${skillName}" 已存在，跳过`);
+      continue;
+    }
+
+    // 将 skill 复制到外部管理目录（避免引用整个仓库）
+    const managedPath = join(EXTERNAL_SKILLS_DIR, skillName);
+    if (existsSync(managedPath) && managedPath !== skillDir) {
+      rmSync(managedPath, { recursive: true, force: true });
+    }
+    if (managedPath !== skillDir) {
+      cpSync(skillDir, managedPath, { recursive: true });
+    }
+
+    try {
+      symlinkSync(managedPath, targetPath);
+      results.push(`"${skillName}" 导入成功`);
+    } catch (error) {
+      results.push(`"${skillName}" 创建链接失败`);
+    }
+  }
+
+  // 清理克隆的仓库（如果已复制 skill 到管理目录）
+  if (existsSync(cloneDest)) {
+    rmSync(cloneDest, { recursive: true, force: true });
+  }
+
+  invalidateSkillsCache();
+
+  const successCount = results.filter((r) => r.includes("导入成功")).length;
+  if (successCount === 0) {
+    return { success: false, message: results.join("\n") || "未导入任何 Skill" };
+  }
+
+  return { success: true, message: `成功导入 ${successCount} 个 Skill\n${results.join("\n")}` };
 }
