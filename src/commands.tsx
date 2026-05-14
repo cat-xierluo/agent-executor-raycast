@@ -36,7 +36,7 @@ import {
 } from "./utils/devonthink";
 import { readdirSync, statSync } from "fs";
 import { join } from "path";
-import { countRunningCommands } from "./utils/status";
+import { countRunningCommands, markStuckStartedTasks } from "./utils/status";
 import { recordExecution, getGlobalSummary } from "./utils/stats";
 import StatusList from "./status";
 import { triggerStatusRefresh } from "./contexts/StatusRefreshContext";
@@ -112,6 +112,7 @@ export default function CommandList() {
     const interval = setInterval(() => {
       loadRunningCountRef.current();
       loadSkillsRef.current();
+      markStuckStartedTasks();
       scheduleNext();
       setQueuedTasks(getQueuedTasks());
     }, 5000);
@@ -312,20 +313,6 @@ export default function CommandList() {
   async function executeFreeCommand() {
     if (processingCommand.some((c) => c.name === "free-command")) return;
 
-    const validFiles = selectedFiles.filter(
-      (file) => file && file.trim().length > 0,
-    );
-    const executionFile = validFiles[0];
-
-    if (!executionFile) {
-      await showToast({
-        style: Toast.Style.Failure,
-        title: "未选择文件",
-        message: "请在 Finder、DEVONthink 或 VS Code 中选择文件后重试",
-      });
-      return;
-    }
-
     const userPrompt = note.trim();
     if (!userPrompt) {
       await showToast({
@@ -336,52 +323,58 @@ export default function CommandList() {
       return;
     }
 
+    const validFiles = selectedFiles.filter(
+      (file) => file && file.trim().length > 0,
+    );
+
     setProcessingCommand((prev) => [...prev, { name: "free-command" }]);
 
-    // DEVONthink 文件导出
-    let actualFilePath = executionFile;
-    const record = executionFile
-      ? devonThinkRecords.get(executionFile)
-      : undefined;
-
-    if (
-      record &&
-      executionFile &&
-      (isDevonThinkURL(executionFile) || isFilesNoIndexPath(executionFile))
-    ) {
-      const exportToast = await showToast({
-        style: Toast.Style.Animated,
-        title: "正在导出文件",
-        message: "从 DEVONthink 导出文件到临时目录...",
-      });
-
-      try {
-        const prepared = await prepareFilePathForCommand(record);
-        actualFilePath = prepared.path;
-        if (prepared.isTemp) {
+    // 多文件 DEVONthink 导出
+    const exportedPaths: string[] = [];
+    for (const file of validFiles) {
+      const record = devonThinkRecords.get(file);
+      if (
+        record &&
+        (isDevonThinkURL(file) || isFilesNoIndexPath(file))
+      ) {
+        const exportToast = await showToast({
+          style: Toast.Style.Animated,
+          title: "正在导出文件",
+          message: `从 DEVONthink 导出: ${file.split("/").pop()}`,
+        });
+        try {
+          const prepared = await prepareFilePathForCommand(record);
+          exportedPaths.push(prepared.path);
+          if (prepared.isTemp) {
+            await exportToast.hide();
+            await showToast({
+              style: Toast.Style.Success,
+              title: "文件已导出",
+              message: `临时路径: ${prepared.path}`,
+            });
+          }
+        } catch (error) {
           await exportToast.hide();
           await showToast({
-            style: Toast.Style.Success,
-            title: "文件已导出",
-            message: `临时路径: ${actualFilePath}`,
+            style: Toast.Style.Failure,
+            title: "导出文件失败",
+            message: error instanceof Error ? error.message : "未知错误",
           });
+          setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
+          return;
         }
-      } catch (error) {
-        await exportToast.hide();
-        await showToast({
-          style: Toast.Style.Failure,
-          title: "导出文件失败",
-          message: error instanceof Error ? error.message : "未知错误",
-        });
-        setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
-        return;
+      } else {
+        // 普通文件路径直接使用
+        exportedPaths.push(file);
       }
     }
 
     const toast = await showToast({
       style: Toast.Style.Animated,
       title: "正在执行自由指令",
-      message: actualFilePath.split("/").pop() || "",
+      message: validFiles.length === 1
+        ? validFiles[0].split("/").pop()
+        : `${validFiles.length} 个文件`,
     });
 
     const executionStartTime = Date.now();
@@ -389,14 +382,13 @@ export default function CommandList() {
 
     try {
       const projectDir = config.projectDirs[0];
-      const logger = new RunLogger(actualFilePath, projectDir);
 
-      logger.logValidated();
+      // 构建 prompt: 多文件支持
+      const prompt = exportedPaths.length > 0
+        ? `${userPrompt} ${exportedPaths.map((f) => `"${f}"`).join(" ")}`
+        : userPrompt;
 
-      // 构建 prompt: 直接使用用户输入，不加 /skillname 前缀
-      const prompt = `${userPrompt} "${actualFilePath}"`;
-
-      // 并发数检查
+      // 并发数检查（在创建 RunLogger 之前，避免 orphan started 事件）
       const currentRunning = countRunningCommands();
       const limit = getConcurrencyLimit();
       if (currentRunning >= limit) {
@@ -420,6 +412,10 @@ export default function CommandList() {
         });
         return;
       }
+
+      // 并发检查通过后才创建 RunLogger
+      const logger = new RunLogger(actualFilePath, projectDir);
+      logger.logValidated();
 
       let result;
 
@@ -561,50 +557,55 @@ export default function CommandList() {
 
     setProcessingCommand((prev) => [...prev, { name: skill.name }]);
 
-    // DEVONthink 文件导出
-    let actualFilePath = executionFile || "";
-    const record = executionFile
-      ? devonThinkRecords.get(executionFile)
-      : undefined;
-
-    if (
-      record &&
-      executionFile &&
-      (isDevonThinkURL(executionFile) || isFilesNoIndexPath(executionFile))
-    ) {
-      const exportToast = await showToast({
-        style: Toast.Style.Animated,
-        title: "正在导出文件",
-        message: "从 DEVONthink 导出文件到临时目录...",
-      });
-
-      try {
-        const prepared = await prepareFilePathForCommand(record);
-        actualFilePath = prepared.path;
-        if (prepared.isTemp) {
+    // 多文件 DEVONthink 导出
+    const exportedPaths: string[] = [];
+    for (const file of validFiles) {
+      const record = devonThinkRecords.get(file);
+      if (
+        record &&
+        (isDevonThinkURL(file) || isFilesNoIndexPath(file))
+      ) {
+        const exportToast = await showToast({
+          style: Toast.Style.Animated,
+          title: "正在导出文件",
+          message: `从 DEVONthink 导出: ${file.split("/").pop()}`,
+        });
+        try {
+          const prepared = await prepareFilePathForCommand(record);
+          exportedPaths.push(prepared.path);
+          if (prepared.isTemp) {
+            await exportToast.hide();
+            await showToast({
+              style: Toast.Style.Success,
+              title: "文件已导出",
+              message: `临时路径: ${prepared.path}`,
+            });
+          }
+        } catch (error) {
           await exportToast.hide();
           await showToast({
-            style: Toast.Style.Success,
-            title: "文件已导出",
-            message: `临时路径: ${actualFilePath}`,
+            style: Toast.Style.Failure,
+            title: "导出文件失败",
+            message: error instanceof Error ? error.message : "未知错误",
           });
+          setProcessingCommand((prev) => prev.filter((c) => c.name !== skill.name));
+          return;
         }
-      } catch (error) {
-        await exportToast.hide();
-        await showToast({
-          style: Toast.Style.Failure,
-          title: "导出文件失败",
-          message: error instanceof Error ? error.message : "未知错误",
-        });
-        setProcessingCommand((prev) => prev.filter((c) => c.name !== skill.name));
-        return;
+      } else {
+        // 普通文件路径直接使用
+        exportedPaths.push(file);
       }
     }
+
+    // 用于日志和排队的单个文件路径（取第一个）
+    const actualFilePath = exportedPaths[0] || "";
 
     const toast = await showToast({
       style: Toast.Style.Animated,
       title: `正在执行：${skill.title}`,
-      message: actualFilePath.split("/").pop() || "",
+      message: validFiles.length === 1
+        ? validFiles[0].split("/").pop()
+        : `${validFiles.length} 个文件`,
     });
 
     const executionStartTime = Date.now();
@@ -612,29 +613,20 @@ export default function CommandList() {
 
     try {
       const projectDir = skill.projectDir || config.projectDirs[0];
-      const logger = new RunLogger(actualFilePath || skill.name, projectDir);
-
-      logger.logValidated();
-      // 注意: startRealtimeLogging() 在 executeClaudeStreaming/executeClaudeCommand 内部调用
 
       // 构建 prompt
       let prompt = `/${skill.name}`;
 
-      if (needsFile) {
-        if (validFiles.length > 1) {
-          // 多文件：传递所有选中文件
-          prompt += " " + validFiles.map((f) => `"${f}"`).join(" ");
-        } else if (actualFilePath) {
-          // 单文件：只传一个
-          prompt += ` "${actualFilePath}"`;
-        }
+      if (needsFile && exportedPaths.length > 0) {
+        // 多文件支持：传递所有文件（已导出的 DEVONthink 路径或原始路径）
+        prompt += " " + exportedPaths.map((f) => `"${f}"`).join(" ");
       }
 
       if (note && note.trim()) {
         prompt += ` ${note.trim()}`;
       }
 
-      // 并发数检查
+      // 并发数检查（在创建 RunLogger 之前，避免 orphan started 事件）
       const currentRunning = countRunningCommands();
       const limit = getConcurrencyLimit();
       if (currentRunning >= limit) {
@@ -658,6 +650,10 @@ export default function CommandList() {
         });
         return;
       }
+
+      // 并发检查通过后才创建 RunLogger，避免入队时产生 orphan started 事件
+      const logger = new RunLogger(actualFilePath || skill.name, projectDir);
+      logger.logValidated();
 
       let result;
 
@@ -981,18 +977,21 @@ export default function CommandList() {
           )}
 
 
-          {/* 自由指令入口 - 始终显示（当有文件选中时） */}
-          {selectedFiles.length > 0 && (
-            <ListItem
-              id="free-command"
-              title={`💬 ${note.trim() ? `自由指令：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}` : "自由指令"}`}
-              subtitle={
-                note.trim()
-                  ? selectedFiles.length === 1
-                    ? `将对 "${selectedFiles[0].split("/").pop()}" 执行`
-                    : `将对 ${selectedFiles.length} 个文件执行`
-                  : "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
-              }
+          {/* 自由指令入口 - 始终显示 */}
+          <ListItem
+            id="free-command"
+            title={`💬 ${note.trim() ? `自由指令：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}` : "自由指令"}`}
+            subtitle={
+              note.trim()
+                ? selectedFiles.length === 1
+                  ? `将对 "${selectedFiles[0].split("/").pop()}" 执行`
+                  : selectedFiles.length > 1
+                  ? `将对 ${selectedFiles.length} 个文件执行`
+                  : "将对工作目录执行"
+                : selectedFiles.length > 0
+                ? "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
+                : "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
+            }
               icon={Icon.SpeechBubble}
               accessories={[
                 {
@@ -1024,7 +1023,6 @@ export default function CommandList() {
                 </ActionPanel>
               }
             />
-          )}
 
           {items.map((skill) => {
             const queuedItem = queuedTasks.find((t) => t.skillName === skill.name);

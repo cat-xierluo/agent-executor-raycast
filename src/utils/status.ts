@@ -711,3 +711,51 @@ export function countExecutionsFromLog(): Record<string, number> {
   logCountCacheTime = Date.now();
   return counts;
 }
+
+/**
+ * 启动超时阈值：有 started 但无 executing 的事件超过此时间后自动标记为 failed
+ */
+/**
+ * 启动超时阈值：只影响 started → executing 的间隔（正常是毫秒级）。
+ * 不影响任务的实际执行时长（executing → completed/failed）。
+ */
+const STUCK_START_THRESHOLD_MS = 60 * 1000;
+
+/**
+ * 检测并修复僵尸 started 任务：有 started 事件但没有 executing/completed/failed 事件，
+ * 且 started 时间距今超过阈值，说明进程从未成功启动（spawn 失败或被跳过），
+ * 自动追加 failed 事件。
+ * @returns 修复的任务数量
+ */
+export function markStuckStartedTasks(): number {
+  const entries = readLogEntries();
+  const grouped = groupLogsByRunId(entries);
+  const now = Date.now();
+  let cleaned = 0;
+
+  for (const [runId, logs] of grouped.entries()) {
+    const events = new Set(logs.map((l) => l.event));
+    if (events.has("completed") || events.has("failed") || events.has("executing")) continue;
+
+    const startedLog = logs.find((l) => l.event === "started");
+    if (!startedLog) continue;
+
+    const elapsed = now - parseLocalTime(startedLog.timestamp).getTime();
+    if (elapsed > STUCK_START_THRESHOLD_MS) {
+      writeJsonLog("failed", "error", runId, {
+        duration: Math.round(elapsed / 1000),
+        exit_code: -1,
+        output: "(任务启动超时，自动标记为失败)",
+        reason: "start_timeout",
+        target: startedLog.target,
+        work_dir: startedLog.workDir,
+      });
+      cleaned++;
+    }
+  }
+
+  if (cleaned > 0) {
+    console.log(`[markStuckStartedTasks] 清理了 ${cleaned} 个僵尸 started 任务`);
+  }
+  return cleaned;
+}
