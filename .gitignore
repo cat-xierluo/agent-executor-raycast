@@ -5,6 +5,9 @@ dist
 .DS_Store
 settings.json
 
+# Ignore archive directory
+archive
+
 # Ignore all log files and directories
 logs/*.jsonl
 logs/*.log
