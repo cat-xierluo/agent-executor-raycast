@@ -388,6 +388,9 @@ export default function CommandList() {
         ? `${userPrompt} ${exportedPaths.map((f) => `"${f}"`).join(" ")}`
         : userPrompt;
 
+      // 用于日志和排队的单个文件路径（取第一个）
+      const actualFilePath = exportedPaths[0] || "";
+
       // 并发数检查（在创建 RunLogger 之前，避免 orphan started 事件）
       const currentRunning = countRunningCommands();
       const limit = getConcurrencyLimit();
