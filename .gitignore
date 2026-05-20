@@ -17,3 +17,5 @@ logs/*.sh
 
 # Ignore Claude Code project settings (contains API keys)
 .claude/settings.json
+.claude/settings.local.json
+.claude/-settings.json
