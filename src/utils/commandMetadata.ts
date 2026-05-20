@@ -125,7 +125,9 @@ export function toggleCommandNew(commandName: string): boolean {
 /**
  * 批量更新命令元数据（用于扫描命令时应用）
  */
-export function applyMetadataToCommands(commands: any[]): any[] {
+export function applyMetadataToCommands<
+  T extends { name: string; pinned?: boolean; isNew?: boolean; note?: string },
+>(commands: T[]): T[] {
   const metadata = readCommandMetadata();
 
   return commands.map((command) => {
@@ -142,7 +144,9 @@ export function applyMetadataToCommands(commands: any[]): any[] {
 /**
  * 批量更新技能元数据（用于扫描技能时应用）
  */
-export function applyMetadataToSkills(skills: any[]): any[] {
+export function applyMetadataToSkills<
+  T extends { name: string; pinned?: boolean; isNew?: boolean; note?: string },
+>(skills: T[]): T[] {
   const metadata = readCommandMetadata();
 
   return skills.map((skill) => {
