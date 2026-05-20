@@ -6,20 +6,11 @@ import {
   Toast,
   showToast,
   Icon,
-  closeMainWindow,
-  openCommandPreferences,
-  Detail,
 } from "@raycast/api";
 import { useState, useEffect } from "react";
-import { readFileSync, existsSync, readdirSync, statSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import {
-  LOG_DIR,
-  RUNS_DIR,
-  INDEX_FILE,
-  ERROR_LOG,
-  JSONL_LOG,
-} from "./utils/logger";
+import { LOG_DIR, RUNS_DIR, INDEX_FILE, JSONL_LOG } from "./utils/logger";
 
 interface LogEntry {
   timestamp: string;
@@ -44,19 +35,19 @@ function parseJsonlLog(): LogEntry[] {
     const lines = content.trim().split("\n");
 
     // 按 run_id 分组
-    const runGroups = new Map<string, any[]>();
+    const runGroups = new Map<string, JsonLogEvent[]>();
 
     lines.forEach((line) => {
       try {
-        const parsed = JSON.parse(line);
+        const parsed = JSON.parse(line) as JsonLogEvent;
         const runId = parsed.run_id;
-        if (runId) {
+        if (typeof runId === "string" && runId) {
           if (!runGroups.has(runId)) {
             runGroups.set(runId, []);
           }
           runGroups.get(runId)!.push(parsed);
         }
-      } catch (error) {
+      } catch {
         // 跳过无法解析的行
       }
     });
@@ -67,7 +58,8 @@ function parseJsonlLog(): LogEntry[] {
     for (const [runId, events] of runGroups) {
       // 按时间戳排序
       events.sort(
-        (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
+        (a, b) =>
+          new Date(a.ts || "").getTime() - new Date(b.ts || "").getTime(),
       );
 
       // 查找关键事件
@@ -92,7 +84,7 @@ function parseJsonlLog(): LogEntry[] {
         executingEvent?.target ||
         startedEvent?.target ||
         "";
-      const filename = targetPath.split("/").pop() || runId;
+      const filename = (targetPath || "").split("/").pop() || runId;
 
       // 处理执行时长
       let duration = "未知";
@@ -127,7 +119,7 @@ function parseJsonlLog(): LogEntry[] {
       const pid = executingEvent?.pid?.toString();
 
       entries.push({
-        timestamp: startedEvent.ts,
+        timestamp: startedEvent.ts || "",
         status,
         runId,
         filename,
@@ -161,40 +153,18 @@ interface LogDetail {
   exitCode: number;
 }
 
-/**
- * 从 JSONL 日志中读取指定 runId 的 PID
- * 用于从旧日志文件中恢复 PID 信息
- */
-function getPidFromJsonL(runId: string): string | undefined {
-  try {
-    const jsonlPath = join(LOG_DIR, "agent-executor.jsonl");
-    if (!existsSync(jsonlPath)) {
-      return undefined;
-    }
-
-    const content = readFileSync(jsonlPath, "utf-8");
-    const lines = content.trim().split("\n");
-
-    // 倒序查找，找到最新的 executing 事件
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const parsed = JSON.parse(lines[i]);
-        if (
-          parsed.run_id === runId &&
-          parsed.event === "executing" &&
-          parsed.pid
-        ) {
-          return parsed.pid.toString();
-        }
-      } catch (error) {
-        // 跳过无法解析的行
-        continue;
-      }
-    }
-    return undefined;
-  } catch (error) {
-    return undefined;
-  }
+interface JsonLogEvent {
+  ts?: string;
+  run_id?: string;
+  event?: string;
+  status?: string;
+  target?: string;
+  work_dir?: string;
+  cmd?: string;
+  output?: string;
+  duration?: number | string;
+  exit_code?: number;
+  pid?: number | string;
 }
 
 function parseIndexFile(): LogEntry[] {
@@ -231,7 +201,7 @@ function parseIndexFile(): LogEntry[] {
           if (pidMatch) {
             pid = pidMatch[1];
           }
-        } catch (error) {
+        } catch {
           // 如果读取失败，PID 保持为 undefined
         }
       }
@@ -273,7 +243,7 @@ function parseTimeString(timeStr: string): Date | null {
     }
     // 如果解析失败，尝试直接创建Date对象
     return new Date(timeStr);
-  } catch (error) {
+  } catch {
     return null;
   }
 }
@@ -319,12 +289,14 @@ function parseRunLog(logPath: string): LogDetail | null {
     const runEntries = lines
       .map((line) => {
         try {
-          return JSON.parse(line);
+          return JSON.parse(line) as JsonLogEvent;
         } catch {
           return null;
         }
       })
-      .filter((entry) => entry && entry.run_id === runId);
+      .filter((entry): entry is JsonLogEvent =>
+        Boolean(entry && entry.run_id === runId),
+      );
 
     if (runEntries.length === 0) {
       return null;
@@ -504,10 +476,6 @@ export default function LogsViewer() {
 
   function getStatusIcon(status: string): Icon {
     return status === "成功" ? Icon.CheckCircle : Icon.XMarkCircle;
-  }
-
-  function getStatusColor(status: string): string {
-    return status === "成功" ? "green" : "red";
   }
 
   return (

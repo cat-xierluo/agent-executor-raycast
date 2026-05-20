@@ -14,7 +14,6 @@ import { useState, useEffect } from "react";
 import {
   getGlobalSummary,
   getAllCommandStats,
-  clearAllStats,
   clearCommandStats,
   CommandStats,
 } from "../utils/stats";

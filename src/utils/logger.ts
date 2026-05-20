@@ -5,7 +5,6 @@ import {
   mkdirSync,
   readFileSync,
   writeFileSync,
-  createWriteStream,
   WriteStream,
 } from "fs";
 import { environment } from "@raycast/api";
@@ -75,7 +74,7 @@ export function writeJsonLog(
   event: string,
   status: string,
   runId: string,
-  extraData: Record<string, any> = {},
+  extraData: Record<string, unknown> = {},
 ): void {
   ensureLogDirs();
 
@@ -83,7 +82,7 @@ export function writeJsonLog(
 
   // 改进的字段处理逻辑 - 明确区分字段存在性和值类型
   const extraFields = Object.entries(extraData)
-    .filter(([_, value]) => value !== undefined) // 只处理已定义的字段
+    .filter((entry) => entry[1] !== undefined) // 只处理已定义的字段
     .map(([key, value]) => {
       if (typeof value === "string") {
         return `, "${key}":"${escapeJsonString(value)}"`;
@@ -294,7 +293,7 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
   /**
    * 停止实时日志流
    */
-  stopRealtimeLogging(output: string, exitCode: number): void {
+  stopRealtimeLogging(): void {
     // 实时日志流已经停止，不需要额外操作
     // 所有数据已经写入JSONL
   }
@@ -331,12 +330,18 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
     }
   }
 
-  logCompleted(output: string, exitCode: number, pid?: number, sessionId?: string, apiSuccess?: boolean): void {
+  logCompleted(
+    output: string,
+    exitCode: number,
+    pid?: number,
+    sessionId?: string,
+    apiSuccess?: boolean,
+  ): void {
     const duration = Date.now() - this.startTime;
 
     // 停止实时日志流（如果存在）
     if (this.logStream) {
-      this.stopRealtimeLogging(output, exitCode);
+      this.stopRealtimeLogging();
     }
 
     // 使用实时积累的输出内容,如果没有则使用传入的output

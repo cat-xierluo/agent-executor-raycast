@@ -1,7 +1,6 @@
 import { exec } from "child_process";
 import { readFileSync, statSync } from "fs";
 import { join as pathJoin } from "path";
-import { showToast, Toast } from "@raycast/api";
 import { homedir } from "os";
 
 // 异步执行 shell 命令，避免阻塞事件循环
@@ -65,7 +64,7 @@ export async function getSelectedDevonThinkRecords(): Promise<
   let bundleId: string;
   try {
     bundleId = await getDevonThinkBundleId();
-  } catch (error) {
+  } catch {
     throw new Error("DEVONthink 未运行，请先启动 DEVONthink");
   }
 

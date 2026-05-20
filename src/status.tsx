@@ -24,6 +24,16 @@ import { GlobalStatsItem } from "./components/StatsComponents";
 import { useStatusRefresh } from "./contexts/StatusRefreshContext";
 import { getQueuedTasks, dequeue, QueuedTask } from "./utils/taskQueue";
 
+interface JsonLogEntry {
+  ts?: string;
+  run_id?: string;
+  event?: string;
+  cmd?: string;
+  output?: string;
+  duration?: number | string;
+  exit_code?: number;
+}
+
 export default function StatusList() {
   const [runs, setRuns] = useState<{
     running: RunInfo[];
@@ -31,7 +41,7 @@ export default function StatusList() {
     failed: RunInfo[];
   }>({ running: [], completed: [], failed: [] });
   const [isLoading, setIsLoading] = useState(true);
-  const [tick, setTick] = useState(0); // 用于触发运行中任务的时长更新
+  const [, setTick] = useState(0); // 用于触发运行中任务的时长更新
   const [queuedTasks, setQueuedTasks] = useState<QueuedTask[]>([]);
   const { version } = useStatusRefresh();
 
@@ -313,7 +323,8 @@ export default function StatusList() {
     }
   }
 
-  const totalCount = runs.running.length + runs.completed.length + runs.failed.length;
+  const totalCount =
+    runs.running.length + runs.completed.length + runs.failed.length;
 
   return (
     <List
@@ -358,7 +369,11 @@ export default function StatusList() {
               key={task.id}
               id={task.id}
               title={task.skillName}
-              subtitle={task.targetFilePath ? task.targetFilePath.split("/").pop() : undefined}
+              subtitle={
+                task.targetFilePath
+                  ? task.targetFilePath.split("/").pop()
+                  : undefined
+              }
               icon={Icon.Clock}
               accessories={[
                 { text: `#${index + 1}` },
@@ -460,10 +475,10 @@ export function LogDetail({ run }: LogDetailProps) {
       const lines = jsonlContent.trim().split("\n");
 
       // 只解析属于该 runId 的条目（跳过不相关的行）
-      const runEntries: any[] = [];
+      const runEntries: JsonLogEntry[] = [];
       for (const line of lines) {
         try {
-          const parsed = JSON.parse(line);
+          const parsed = JSON.parse(line) as JsonLogEntry;
           if (parsed.run_id === run.runId) {
             runEntries.push(parsed);
           }
@@ -486,7 +501,7 @@ export function LogDetail({ run }: LogDetailProps) {
       );
 
       // 构建日志内容
-      let logLines: string[] = [];
+      const logLines: string[] = [];
       logLines.push("========================================");
       logLines.push("Agent Executor - 运行日志");
       logLines.push("========================================");
