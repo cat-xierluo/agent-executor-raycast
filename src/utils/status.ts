@@ -2,13 +2,19 @@ import {
   readFileSync,
   existsSync,
   writeFileSync,
-  readdirSync,
   unlinkSync,
   statSync,
 } from "fs";
 import { execSync } from "child_process";
 import { join } from "path";
-import { LogEntry, JSONL_LOG, RUNS_DIR, INDEX_FILE, ERROR_LOG, writeJsonLog } from "./logger";
+import {
+  LogEntry,
+  JSONL_LOG,
+  RUNS_DIR,
+  INDEX_FILE,
+  ERROR_LOG,
+  writeJsonLog,
+} from "./logger";
 
 /**
  * 检查指定 PID 的进程是否真实存活
@@ -35,14 +41,14 @@ export function isProcessAlive(pid: number): boolean {
       }
 
       return true;
-    } catch (psError) {
+    } catch {
       // ps 命令失败，保守地认为进程不可访问
       return false;
     }
   } catch (error) {
     // 如果抛出错误（通常是 ESRCH - No such process），说明进程不存在
-    const errno = (error as any).errno;
-    if (errno === "ESRCH" || errno === "EPERM") {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ESRCH" || code === "EPERM") {
       return false;
     }
     // 其他错误也认为进程不可访问
@@ -267,7 +273,7 @@ export function readLogEntries(): LogEntry[] {
             output: parsed.output,
             outputFile: parsed.output_file, // 临时输出文件路径
           };
-        } catch (error) {
+        } catch {
           // 跳过无法解析的行
           return null;
         }
@@ -381,7 +387,8 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
   } else {
     // 没有日志事件时，使用深度PID检测
     if (pid) {
-      const processInfo = detectProcessStatus(pid, runId, directory);
+      const monitoredTargetPath = isFilePath ? targetFullPath : "";
+      const processInfo = detectProcessStatus(pid, runId, monitoredTargetPath);
 
       if (processInfo.status === "completed") {
         status = "completed";
@@ -410,7 +417,11 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
             actualDuration = (endTime.getTime() - startTime.getTime()) / 1000;
 
             // 清理临时文件
-            try { unlinkSync(tempOutputPath); } catch {}
+            try {
+              unlinkSync(tempOutputPath);
+            } catch {
+              // 忽略临时文件清理失败
+            }
             console.log(
               `[extractRunInfo] 从临时文件恢复输出成功，实际耗时: ${actualDuration?.toFixed(1)}s`,
             );
@@ -422,7 +433,8 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
         if (!endTime) {
           endTime = new Date();
         }
-        duration = actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
+        duration =
+          actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
 
         // 写入completed事件到JSONL,避免下次再计算
         writeJsonLog("completed", "success", runId, {
@@ -455,7 +467,11 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
             actualDuration = (endTime.getTime() - startTime.getTime()) / 1000;
 
             // 清理临时文件
-            try { unlinkSync(tempOutputPath); } catch {}
+            try {
+              unlinkSync(tempOutputPath);
+            } catch {
+              // 忽略临时文件清理失败
+            }
             console.log(
               `[extractRunInfo] 从临时文件恢复失败输出成功，实际耗时: ${actualDuration?.toFixed(1)}s`,
             );
@@ -467,7 +483,8 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
         if (!endTime) {
           endTime = new Date();
         }
-        duration = actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
+        duration =
+          actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
 
         // 写入failed事件到JSONL,避免下次再计算
         writeJsonLog("failed", "error", runId, {
@@ -735,7 +752,12 @@ export function markStuckStartedTasks(): number {
 
   for (const [runId, logs] of grouped.entries()) {
     const events = new Set(logs.map((l) => l.event));
-    if (events.has("completed") || events.has("failed") || events.has("executing")) continue;
+    if (
+      events.has("completed") ||
+      events.has("failed") ||
+      events.has("executing")
+    )
+      continue;
 
     const startedLog = logs.find((l) => l.event === "started");
     if (!startedLog) continue;
@@ -755,7 +777,9 @@ export function markStuckStartedTasks(): number {
   }
 
   if (cleaned > 0) {
-    console.log(`[markStuckStartedTasks] 清理了 ${cleaned} 个僵尸 started 任务`);
+    console.log(
+      `[markStuckStartedTasks] 清理了 ${cleaned} 个僵尸 started 任务`,
+    );
   }
   return cleaned;
 }

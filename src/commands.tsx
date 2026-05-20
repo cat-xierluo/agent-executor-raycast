@@ -34,8 +34,6 @@ import {
   isVSCodeApp,
   getVSCodeActiveFile,
 } from "./utils/devonthink";
-import { readdirSync, statSync } from "fs";
-import { join } from "path";
 import { countRunningCommands, markStuckStartedTasks } from "./utils/status";
 import { recordExecution, getGlobalSummary } from "./utils/stats";
 import StatusList from "./status";
@@ -62,7 +60,6 @@ const SKILLS_REQUIRE_CONFIRM: Record<
   "sync-external": { title: "同步外部文件", message: "确定要同步外部文件吗?" },
 };
 
-
 export default function CommandList() {
   const [items, setItems] = useState<ClaudeSkill[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -70,7 +67,9 @@ export default function CommandList() {
   const [devonThinkRecords, setDevonThinkRecords] = useState<
     Map<string, DevonThinkRecord>
   >(new Map());
-  const [processingCommand, setProcessingCommand] = useState<{ name: string; pid?: number }[]>([]);
+  const [processingCommand, setProcessingCommand] = useState<
+    { name: string; pid?: number }[]
+  >([]);
   const [note, setNote] = useState<string>("");
   const [runningCount, setRunningCount] = useState<number>(0);
   const [totalExecutions, setTotalExecutions] = useState<number>(0);
@@ -142,7 +141,10 @@ export default function CommandList() {
     setProcessingCommand((prev) => [...prev, { name: task.skillName }]);
 
     try {
-      const logger = new RunLogger(task.targetFilePath || task.skillName, task.projectDir);
+      const logger = new RunLogger(
+        task.targetFilePath || task.skillName,
+        task.projectDir,
+      );
       logger.logValidated();
 
       const result = await executeClaudeCommand(
@@ -151,22 +153,32 @@ export default function CommandList() {
           workDir: task.projectDir,
           projectDir: task.projectDir,
           claudeBin: task.claudeBin,
-          headlessMode: true,
+          headlessMode: task.headlessMode,
         },
         logger,
       );
 
-      logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
+      logger.logCompleted(
+        result.output,
+        result.exitCode,
+        undefined,
+        undefined,
+        result.apiSuccess,
+      );
       recordExecution(task.skillName, result.success, Date.now() - startTime);
 
       if (result.success) {
-        await showHUD(`✅ ${task.skillName} 完成 (${Math.round(result.duration / 1000)}s)`);
+        await showHUD(
+          `✅ ${task.skillName} 完成 (${Math.round(result.duration / 1000)}s)`,
+        );
       }
     } catch (error) {
       console.error(`[queue] ${task.skillName} error:`, error);
       recordExecution(task.skillName, false, Date.now() - startTime);
     } finally {
-      setProcessingCommand((prev) => prev.filter((c) => c.name !== task.skillName));
+      setProcessingCommand((prev) =>
+        prev.filter((c) => c.name !== task.skillName),
+      );
       loadRunningCountRef.current();
       setQueuedTasks(getQueuedTasks());
       triggerStatusRefresh();
@@ -176,11 +188,11 @@ export default function CommandList() {
   async function loadSkills() {
     try {
       const config = getConfig();
-      const availableSkills = scanSkills(config.projectDirs);
+      const availableSkills = scanSkills(config.projectDirs, config.skillsDirs);
       setItems(availableSkills);
     } catch (error) {
-      const isConfigError =
-        error instanceof Error && (error as any).isConfigError;
+      const configError = error as Error & { isConfigError?: boolean };
+      const isConfigError = error instanceof Error && configError.isConfigError;
 
       await showToast({
         style: Toast.Style.Failure,
@@ -333,10 +345,7 @@ export default function CommandList() {
     const exportedPaths: string[] = [];
     for (const file of validFiles) {
       const record = devonThinkRecords.get(file);
-      if (
-        record &&
-        (isDevonThinkURL(file) || isFilesNoIndexPath(file))
-      ) {
+      if (record && (isDevonThinkURL(file) || isFilesNoIndexPath(file))) {
         const exportToast = await showToast({
           style: Toast.Style.Animated,
           title: "正在导出文件",
@@ -360,7 +369,9 @@ export default function CommandList() {
             title: "导出文件失败",
             message: error instanceof Error ? error.message : "未知错误",
           });
-          setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
+          setProcessingCommand((prev) =>
+            prev.filter((c) => c.name !== "free-command"),
+          );
           return;
         }
       } else {
@@ -372,9 +383,10 @@ export default function CommandList() {
     const toast = await showToast({
       style: Toast.Style.Animated,
       title: "正在执行自由指令",
-      message: validFiles.length === 1
-        ? validFiles[0].split("/").pop()
-        : `${validFiles.length} 个文件`,
+      message:
+        validFiles.length === 1
+          ? validFiles[0].split("/").pop()
+          : `${validFiles.length} 个文件`,
     });
 
     const executionStartTime = Date.now();
@@ -384,9 +396,10 @@ export default function CommandList() {
       const projectDir = config.projectDirs[0];
 
       // 构建 prompt: 多文件支持
-      const prompt = exportedPaths.length > 0
-        ? `${userPrompt} ${exportedPaths.map((f) => `"${f}"`).join(" ")}`
-        : userPrompt;
+      const prompt =
+        exportedPaths.length > 0
+          ? `${userPrompt} ${exportedPaths.map((f) => `"${f}"`).join(" ")}`
+          : userPrompt;
 
       // 用于日志和排队的单个文件路径（取第一个）
       const actualFilePath = exportedPaths[0] || "";
@@ -395,7 +408,9 @@ export default function CommandList() {
       const currentRunning = countRunningCommands();
       const limit = getConcurrencyLimit();
       if (currentRunning >= limit) {
-        setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
+        setProcessingCommand((prev) =>
+          prev.filter((c) => c.name !== "free-command"),
+        );
         await toast.hide();
         enqueue({
           skillName: "free-command",
@@ -434,6 +449,9 @@ export default function CommandList() {
           projectDir,
           claudeBin: config.claudeBin,
           headlessMode: config.headlessMode,
+          onPid: (pid) => {
+            activePids.current["free-command"] = pid;
+          },
           logger,
           onChunk: (chunk, isFinal) => {
             fullOutput += chunk;
@@ -442,7 +460,13 @@ export default function CommandList() {
           },
         });
 
-        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId, result.apiSuccess);
+        logger.logCompleted(
+          fullOutput,
+          result.exitCode,
+          result.pid,
+          result.sessionId,
+          result.apiSuccess,
+        );
         if (result.pid) activePids.current["free-command"] = result.pid;
       } else {
         result = await executeClaudeCommand(
@@ -452,11 +476,20 @@ export default function CommandList() {
             projectDir,
             claudeBin: config.claudeBin,
             headlessMode: config.headlessMode,
+            onPid: (pid) => {
+              activePids.current["free-command"] = pid;
+            },
           },
           logger,
         );
 
-        logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
+        logger.logCompleted(
+          result.output,
+          result.exitCode,
+          undefined,
+          undefined,
+          result.apiSuccess,
+        );
         if (result.pid) activePids.current["free-command"] = result.pid;
       }
 
@@ -512,7 +545,9 @@ export default function CommandList() {
       recordExecution("free-command", false, executionDuration);
     } finally {
       delete activePids.current["free-command"];
-      setProcessingCommand((prev) => prev.filter((c) => c.name !== "free-command"));
+      setProcessingCommand((prev) =>
+        prev.filter((c) => c.name !== "free-command"),
+      );
       if (config.streamingMode && config.headlessMode) {
         setIsStreaming(false);
       }
@@ -564,10 +599,7 @@ export default function CommandList() {
     const exportedPaths: string[] = [];
     for (const file of validFiles) {
       const record = devonThinkRecords.get(file);
-      if (
-        record &&
-        (isDevonThinkURL(file) || isFilesNoIndexPath(file))
-      ) {
+      if (record && (isDevonThinkURL(file) || isFilesNoIndexPath(file))) {
         const exportToast = await showToast({
           style: Toast.Style.Animated,
           title: "正在导出文件",
@@ -591,7 +623,9 @@ export default function CommandList() {
             title: "导出文件失败",
             message: error instanceof Error ? error.message : "未知错误",
           });
-          setProcessingCommand((prev) => prev.filter((c) => c.name !== skill.name));
+          setProcessingCommand((prev) =>
+            prev.filter((c) => c.name !== skill.name),
+          );
           return;
         }
       } else {
@@ -606,9 +640,10 @@ export default function CommandList() {
     const toast = await showToast({
       style: Toast.Style.Animated,
       title: `正在执行：${skill.title}`,
-      message: validFiles.length === 1
-        ? validFiles[0].split("/").pop()
-        : `${validFiles.length} 个文件`,
+      message:
+        validFiles.length === 1
+          ? validFiles[0].split("/").pop()
+          : `${validFiles.length} 个文件`,
     });
 
     const executionStartTime = Date.now();
@@ -633,7 +668,9 @@ export default function CommandList() {
       const currentRunning = countRunningCommands();
       const limit = getConcurrencyLimit();
       if (currentRunning >= limit) {
-        setProcessingCommand((prev) => prev.filter((c) => c.name !== skill.name));
+        setProcessingCommand((prev) =>
+          prev.filter((c) => c.name !== skill.name),
+        );
         await toast.hide();
         enqueue({
           skillName: skill.name,
@@ -672,6 +709,9 @@ export default function CommandList() {
           projectDir,
           claudeBin: config.claudeBin,
           headlessMode: config.headlessMode,
+          onPid: (pid) => {
+            activePids.current[skill.name] = pid;
+          },
           logger,
           onChunk: (chunk, isFinal) => {
             fullOutput += chunk;
@@ -680,7 +720,13 @@ export default function CommandList() {
           },
         });
 
-        logger.logCompleted(fullOutput, result.exitCode, result.pid, result.sessionId, result.apiSuccess);
+        logger.logCompleted(
+          fullOutput,
+          result.exitCode,
+          result.pid,
+          result.sessionId,
+          result.apiSuccess,
+        );
         if (result.pid) activePids.current[skill.name] = result.pid;
       } else {
         result = await executeClaudeCommand(
@@ -690,11 +736,20 @@ export default function CommandList() {
             projectDir,
             claudeBin: config.claudeBin,
             headlessMode: config.headlessMode,
+            onPid: (pid) => {
+              activePids.current[skill.name] = pid;
+            },
           },
           logger,
         );
 
-        logger.logCompleted(result.output, result.exitCode, undefined, undefined, result.apiSuccess);
+        logger.logCompleted(
+          result.output,
+          result.exitCode,
+          undefined,
+          undefined,
+          result.apiSuccess,
+        );
         if (result.pid) activePids.current[skill.name] = result.pid;
       }
 
@@ -762,36 +817,6 @@ export default function CommandList() {
     }
   }
 
-  function getDirectoryContents(
-    dirPath: string,
-  ): { name: string; path: string; isDir: boolean }[] {
-    try {
-      const files = readdirSync(dirPath);
-      return files
-        .map((name) => {
-          const fullPath = join(dirPath, name);
-          const stat = statSync(fullPath);
-          return { name, path: fullPath, isDir: stat.isDirectory() };
-        })
-        .sort((a, b) => {
-          if (a.isDir && !b.isDir) return -1;
-          if (!a.isDir && b.isDir) return 1;
-          return a.name.localeCompare(b.name);
-        });
-    } catch (error) {
-      console.error("Failed to read directory:", error);
-      return [];
-    }
-  }
-
-  function formatFileSize(bytes: number): string {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + " " + sizes[i];
-  }
-
   function closeStreamingOutput() {
     setStreamingOutput("");
     setIsStreaming(false);
@@ -804,7 +829,9 @@ export default function CommandList() {
       <Detail
         markdown={`\`\`\`\n${streamingOutput}\n\`\`\``}
         navigationTitle={
-          streamingCommand ? `执行: ${streamingCommand}` : "流式输出"
+          streamingCommand
+            ? `${isStreaming ? "执行中" : "已完成"}: ${streamingCommand}`
+            : "流式输出"
         }
         actions={
           <ActionPanel>
@@ -872,55 +899,72 @@ export default function CommandList() {
       {selectedFiles.length > 0 && (
         <List.Section
           title={`选中的文件 (${selectedFiles.length})${!showAllFiles && selectedFiles.length > 3 ? ` (显示 3/${selectedFiles.length})` : ""}`}
-          actions={
-            <ActionPanel>
-              <Action
-                title={showAllFiles ? "收起文件列表" : `显示全部 ${selectedFiles.length} 个文件`}
-                onAction={() => setShowAllFiles(!showAllFiles)}
-                icon={showAllFiles ? Icon.ChevronUp : Icon.ChevronDown}
-                shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
-              />
-            </ActionPanel>
-          }
         >
-          {(showAllFiles ? selectedFiles : selectedFiles.slice(0, 3)).map((file, index) => (
-            <ListItem
-              key={`${file}-${index}`}
-              id={`file-${index}`}
-              title={file.split("/").pop() || file}
-              subtitle={file}
-              icon={Icon.Document}
-              accessories={[
-                (() => {
-                  const record = devonThinkRecords.get(file);
-                  if (record) {
-                    if (isDevonThinkURL(file)) {
-                      return { text: "🔗 DevonThink URL", icon: Icon.Link };
-                    } else if (isFilesNoIndexPath(file)) {
-                      return { text: "📦 导入文件", icon: Icon.Box };
-                    } else if (record.hasFileSystemPath) {
-                      return { text: "✓ 索引文件", icon: Icon.Check };
+          {(showAllFiles ? selectedFiles : selectedFiles.slice(0, 3)).map(
+            (file, index) => (
+              <ListItem
+                key={`${file}-${index}`}
+                id={`file-${index}`}
+                title={file.split("/").pop() || file}
+                subtitle={file}
+                icon={Icon.Document}
+                accessories={[
+                  (() => {
+                    const record = devonThinkRecords.get(file);
+                    if (record) {
+                      if (isDevonThinkURL(file)) {
+                        return { text: "🔗 DevonThink URL", icon: Icon.Link };
+                      } else if (isFilesNoIndexPath(file)) {
+                        return { text: "📦 导入文件", icon: Icon.Box };
+                      } else if (record.hasFileSystemPath) {
+                        return { text: "✓ 索引文件", icon: Icon.Check };
+                      }
                     }
-                  }
-                  return null;
-                })(),
-              ].filter(Boolean)}
+                    return null;
+                  })(),
+                ].filter(Boolean)}
+                actions={
+                  <ActionPanel>
+                    <Action.Open
+                      title="在 Finder 中显示"
+                      target={file}
+                      icon={Icon.Finder}
+                    />
+                    <Action.CopyToClipboard
+                      title="复制路径"
+                      content={file}
+                      shortcut={{ modifiers: ["cmd"], key: "c" }}
+                    />
+                  </ActionPanel>
+                }
+              />
+            ),
+          )}
+          {selectedFiles.length > 3 && (
+            <ListItem
+              id="toggle-selected-files"
+              title={
+                showAllFiles
+                  ? "收起文件列表"
+                  : `显示全部 ${selectedFiles.length} 个文件`
+              }
+              icon={showAllFiles ? Icon.ChevronUp : Icon.ChevronDown}
               actions={
                 <ActionPanel>
-                  <Action.Open
-                    title="在 Finder 中显示"
-                    target={file}
-                    icon={Icon.Finder}
-                  />
-                  <Action.CopyToClipboard
-                    title="复制路径"
-                    content={file}
-                    shortcut={{ modifiers: ["cmd"], key: "c" }}
+                  <Action
+                    title={
+                      showAllFiles
+                        ? "收起文件列表"
+                        : `显示全部 ${selectedFiles.length} 个文件`
+                    }
+                    onAction={() => setShowAllFiles(!showAllFiles)}
+                    icon={showAllFiles ? Icon.ChevronUp : Icon.ChevronDown}
+                    shortcut={{ modifiers: ["cmd", "shift"], key: "f" }}
                   />
                 </ActionPanel>
               }
             />
-          ))}
+          )}
         </List.Section>
       )}
 
@@ -979,7 +1023,6 @@ export default function CommandList() {
             />
           )}
 
-
           {/* 自由指令入口 - 始终显示 */}
           <ListItem
             id="free-command"
@@ -989,141 +1032,144 @@ export default function CommandList() {
                 ? selectedFiles.length === 1
                   ? `将对 "${selectedFiles[0].split("/").pop()}" 执行`
                   : selectedFiles.length > 1
-                  ? `将对 ${selectedFiles.length} 个文件执行`
-                  : "将对工作目录执行"
+                    ? `将对 ${selectedFiles.length} 个文件执行`
+                    : "将对工作目录执行"
                 : selectedFiles.length > 0
-                ? "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
-                : "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
+                  ? "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
+                  : "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
             }
-              icon={Icon.SpeechBubble}
-              accessories={[
-                {
-                  text:
-                    processingCommand.some((c) => c.name === "free-command")
-                      ? "执行中..."
-                      : undefined,
-                  icon:
-                    processingCommand.some((c) => c.name === "free-command")
-                      ? Icon.CircleProgress
-                      : undefined,
-                },
-              ].filter(Boolean)}
-              actions={
-                <ActionPanel>
+            icon={Icon.SpeechBubble}
+            accessories={[
+              {
+                text: processingCommand.some((c) => c.name === "free-command")
+                  ? "执行中..."
+                  : undefined,
+                icon: processingCommand.some((c) => c.name === "free-command")
+                  ? Icon.CircleProgress
+                  : undefined,
+              },
+            ].filter(Boolean)}
+            actions={
+              <ActionPanel>
+                <Action
+                  title="执行自由指令"
+                  onAction={executeFreeCommand}
+                  icon={Icon.Play}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
+                />
+                {note.trim() && (
                   <Action
-                    title="执行自由指令"
+                    title={`执行：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}`}
                     onAction={executeFreeCommand}
                     icon={Icon.Play}
-                    shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
                   />
-                  {note.trim() && (
-                    <Action
-                      title={`执行：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}`}
-                      onAction={executeFreeCommand}
-                      icon={Icon.Play}
-                    />
-                  )}
-                </ActionPanel>
-              }
-            />
+                )}
+              </ActionPanel>
+            }
+          />
 
           {items.map((skill) => {
-            const queuedItem = queuedTasks.find((t) => t.skillName === skill.name);
+            const queuedItem = queuedTasks.find(
+              (t) => t.skillName === skill.name,
+            );
             return (
-            <ListItem
-              key={skill.skillDir}
-              id={skill.skillDir}
-              title={`${skill.pinned ? "📌 " : ""}${skill.isNew ? "✨ " : ""}${skill.title}`}
-              subtitle={skill.description}
-              icon={skill.icon}
-              accessories={[
-                (() => {
-                  if (processingCommand.some((c) => c.name === skill.name)) {
-                    return { text: "执行中...", icon: Icon.CircleProgress };
-                  }
-                  if (queuedItem) {
-                    const pos = queuedTasks.indexOf(queuedItem) + 1;
-                    return { text: `队列 #${pos}`, icon: Icon.Clock };
-                  }
-                  return null;
-                })(),
-                skill.pinned ? { text: "置顶", icon: Icon.Pin } : null,
-                skill.isNew && !skill.pinned
-                  ? { text: "新", icon: Icon.Star }
-                  : null,
-                skill.executions && skill.executions > 0
-                  ? { text: String(skill.executions) }
-                  : null,
-              ].filter(Boolean)}
-              actions={
-                <ActionPanel>
-                  <Action
-                    title="执行技能"
-                    onAction={() => executeSkill(skill)}
-                    icon={Icon.Play}
-                    shortcut={{ modifiers: ["cmd"], key: "enter" }}
-                  />
-                  {processingCommand.some((c) => c.name === skill.name) && (
+              <ListItem
+                key={skill.skillDir}
+                id={skill.skillDir}
+                title={`${skill.pinned ? "📌 " : ""}${skill.isNew ? "✨ " : ""}${skill.title}`}
+                subtitle={skill.description}
+                icon={skill.icon}
+                accessories={[
+                  (() => {
+                    if (processingCommand.some((c) => c.name === skill.name)) {
+                      return { text: "执行中...", icon: Icon.CircleProgress };
+                    }
+                    if (queuedItem) {
+                      const pos = queuedTasks.indexOf(queuedItem) + 1;
+                      return { text: `队列 #${pos}`, icon: Icon.Clock };
+                    }
+                    return null;
+                  })(),
+                  skill.pinned ? { text: "置顶", icon: Icon.Pin } : null,
+                  skill.isNew && !skill.pinned
+                    ? { text: "新", icon: Icon.Star }
+                    : null,
+                  skill.executions && skill.executions > 0
+                    ? { text: String(skill.executions) }
+                    : null,
+                ].filter(Boolean)}
+                actions={
+                  <ActionPanel>
                     <Action
-                      title="取消执行"
-                      onAction={() => {
-                        const pid = activePids.current[skill.name];
-                        if (pid) {
-                          try {
-                            process.kill(pid, "SIGTERM");
-                          } catch (error) {
-                            console.error(`Failed to kill process ${pid}:`, error);
-                          }
-                        }
-                        setProcessingCommand((prev) =>
-                          prev.filter((c) => c.name !== skill.name),
-                        );
-                      }}
-                      icon={Icon.XMarkCircle}
-                      shortcut={{ modifiers: ["cmd", "shift"], key: "k" }}
-                    />
-                  )}
-                  {queuedItem && (
-                    <Action
-                      title="取消排队"
-                      onAction={() => {
-                        dequeue(queuedItem.id);
-                        setQueuedTasks(getQueuedTasks());
-                      }}
-                      icon={Icon.XMarkCircle}
-                      shortcut={{ modifiers: ["ctrl"], key: "x" }}
-                    />
-                  )}
-                  {note && note.trim() && (
-                    <Action
-                      title={`执行技能（带备注："${note.trim()}"）`}
+                      title="执行技能"
                       onAction={() => executeSkill(skill)}
                       icon={Icon.Play}
-                      shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
+                      shortcut={{ modifiers: ["cmd"], key: "enter" }}
                     />
-                  )}
-                  <Action
-                    title="切换置顶状态"
-                    onAction={() => {
-                      toggleSkillPinned(skill.name);
-                      loadSkills();
-                    }}
-                    icon={Icon.Pin}
-                    shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
-                  />
-                  <Action
-                    title="切换新标记"
-                    onAction={() => {
-                      toggleSkillNew(skill.name);
-                      loadSkills();
-                    }}
-                    icon={Icon.Star}
-                    shortcut={{ modifiers: ["cmd", "shift"], key: "s" }}
-                  />
-                </ActionPanel>
-              }
-            />
-          );
+                    {processingCommand.some((c) => c.name === skill.name) && (
+                      <Action
+                        title="取消执行"
+                        onAction={() => {
+                          const pid = activePids.current[skill.name];
+                          if (pid) {
+                            try {
+                              process.kill(pid, "SIGTERM");
+                            } catch (error) {
+                              console.error(
+                                `Failed to kill process ${pid}:`,
+                                error,
+                              );
+                            }
+                          }
+                          setProcessingCommand((prev) =>
+                            prev.filter((c) => c.name !== skill.name),
+                          );
+                        }}
+                        icon={Icon.XMarkCircle}
+                        shortcut={{ modifiers: ["cmd", "shift"], key: "k" }}
+                      />
+                    )}
+                    {queuedItem && (
+                      <Action
+                        title="取消排队"
+                        onAction={() => {
+                          dequeue(queuedItem.id);
+                          setQueuedTasks(getQueuedTasks());
+                        }}
+                        icon={Icon.XMarkCircle}
+                        shortcut={{ modifiers: ["ctrl"], key: "x" }}
+                      />
+                    )}
+                    {note && note.trim() && (
+                      <Action
+                        title={`执行技能（带备注："${note.trim()}"）`}
+                        onAction={() => executeSkill(skill)}
+                        icon={Icon.Play}
+                        shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
+                      />
+                    )}
+                    <Action
+                      title="切换置顶状态"
+                      onAction={() => {
+                        toggleSkillPinned(skill.name);
+                        loadSkills();
+                      }}
+                      icon={Icon.Pin}
+                      shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
+                    />
+                    <Action
+                      title="切换新标记"
+                      onAction={() => {
+                        toggleSkillNew(skill.name);
+                        loadSkills();
+                      }}
+                      icon={Icon.Star}
+                      shortcut={{ modifiers: ["cmd", "shift"], key: "s" }}
+                    />
+                  </ActionPanel>
+                }
+              />
+            );
           })}
         </List.Section>
       )}

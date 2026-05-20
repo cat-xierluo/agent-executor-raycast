@@ -6,7 +6,7 @@ import {
   existsSync,
   unlinkSync,
   writeFileSync,
-  chmodSync,
+  appendFileSync,
   readdirSync,
 } from "fs";
 import { getPreferenceValues } from "@raycast/api";
@@ -39,10 +39,13 @@ export function isValidSkillsDir(dir: string): boolean {
 
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
-    // 检查是否有子目录包含 SKILL.md
+    // 检查是否有子目录或符号链接目录包含 skill.md/SKILL.md
     return entries.some((entry) => {
-      if (entry.isDirectory()) {
-        return existsSync(join(dir, entry.name, "SKILL.md"));
+      if (entry.isDirectory() || entry.isSymbolicLink()) {
+        return (
+          existsSync(join(dir, entry.name, "SKILL.md")) ||
+          existsSync(join(dir, entry.name, "skill.md"))
+        );
       }
       return false;
     });
@@ -105,8 +108,8 @@ export function loadConfig(): AgentExecutorConfig {
         `已配置的目录：\n` +
         projectDirs.map((d) => `  - ${d}`).join("\n") +
         `\n\n提示：请在 Raycast 扩展设置中重新配置项目目录。`,
-    );
-    (error as any).isConfigError = true;
+    ) as Error & { isConfigError?: boolean };
+    error.isConfigError = true;
     throw error;
   }
 
@@ -157,6 +160,7 @@ export interface ClaudeExecutionOptions {
   projectDir: string;
   claudeBin?: string;
   headlessMode?: boolean;
+  onPid?: (pid: number) => void;
 }
 
 export interface ClaudeExecutionResult {
@@ -184,12 +188,19 @@ export interface ClaudeStreamingOptions {
   projectDir: string;
   claudeBin?: string;
   headlessMode?: boolean;
+  onPid?: (pid: number) => void;
   onChunk?: StreamingCallback; // 流式输出回调
   logger?: {
     startRealtimeLogging: () => void;
     logRealtime: (chunk: string) => void;
     logExecuting?: (prompt: string, pid?: number) => void;
-    logCompleted: (output: string, exitCode: number, pid?: number, sessionId?: string, apiSuccess?: boolean) => void;
+    logCompleted: (
+      output: string,
+      exitCode: number,
+      pid?: number,
+      sessionId?: string,
+      apiSuccess?: boolean,
+    ) => void;
   };
 }
 
@@ -249,8 +260,8 @@ export async function executeClaudeStreaming(
     projectDir,
     claudeBin: customClaudeBin,
     prompt,
-    workDir,
     headlessMode = true,
+    onPid,
     onChunk,
     logger,
   } = options;
@@ -275,22 +286,33 @@ export async function executeClaudeStreaming(
   logger?.startRealtimeLogging();
 
   return new Promise((resolve) => {
-    let pid: number | undefined;
     let fullOutput = "";
     let sessionId: string | undefined;
     let lineBuffer = ""; // 行缓冲，防止 JSON 在 TCP 分包时被截断
 
-    // 使用 stream-json 格式获取流式输出
-    const bashCommand = `cd "${projectDir}" && "${claudeBin}" -p "${prompt.replace(/"/g, '\\"')}" --output-format stream-json --verbose --include-partial-messages`;
+    // 使用参数数组传递 prompt，避免 shell 转义和注入问题
+    const child = spawn(
+      claudeBin,
+      [
+        "-p",
+        prompt,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+      ],
+      {
+        cwd: projectDir,
+        env: { ...process.env, ...projectEnv },
+        detached: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
 
-    const child = spawn("/bin/bash", ["-c", bashCommand], {
-      cwd: projectDir,
-      env: { ...process.env, ...projectEnv },
-      detached: false,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-
-    pid = child.pid;
+    const pid = child.pid;
+    if (pid) {
+      onPid?.(pid);
+    }
 
     // 记录执行信息（含 PID）
     logger?.logExecuting?.(prompt, pid);
@@ -319,7 +341,11 @@ export async function executeClaudeStreaming(
         }
 
         // 处理最终结果 JSON（包含 is_error 字段）
-        if (parsed.type === "result" || parsed.subtype === "success" || parsed.subtype === "error") {
+        if (
+          parsed.type === "result" ||
+          parsed.subtype === "success" ||
+          parsed.subtype === "error"
+        ) {
           // 将完整结果 JSON 追加到 fullOutput（用于后续解析 is_error）
           fullOutput += line + "\n";
           // 如果有 result 字段的内容，也追加到实时输出
@@ -374,38 +400,17 @@ export async function executeClaudeStreaming(
       }
     });
 
-    // 清理函数：终止 Claude CLI 守护进程
-    function cleanupProcess() {
-      if (pid) {
-        try {
-          // 首先尝试正常终止进程
-          process.kill(pid, "SIGTERM");
-        } catch {
-          // 进程可能已经结束，忽略错误
-        }
-
-        // 延迟后强制终止（如果还没退出）
-        setTimeout(() => {
-          try {
-            process.kill(pid, "SIGKILL");
-          } catch {
-            // 进程已结束，忽略错误
-          }
-        }, 1000);
-      }
-    }
-
     // 处理进程结束
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       const duration = Date.now() - startTime;
-
-      // 清理守护进程
-      cleanupProcess();
+      const exitCode = code ?? (signal ? 1 : 0);
 
       // 尝试从 fullOutput 中解析 is_error 字段
       let apiSuccess: boolean | undefined;
       try {
-        const jsonMatch = fullOutput.match(/\{[\s\S]*"is_error"\s*:\s*(true|false)[\s\S]*\}/);
+        const jsonMatch = fullOutput.match(
+          /\{[\s\S]*"is_error"\s*:\s*(true|false)[\s\S]*\}/,
+        );
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
           if (parsed.is_error !== undefined) {
@@ -417,13 +422,13 @@ export async function executeClaudeStreaming(
       }
 
       // 优先使用 apiSuccess 判断成功与否
-      const isSuccess = apiSuccess !== undefined ? apiSuccess : code === 0;
+      const isSuccess = apiSuccess !== undefined ? apiSuccess : exitCode === 0;
 
       resolve({
         success: isSuccess,
         output: fullOutput || "(无输出)",
         error: !isSuccess ? fullOutput : undefined,
-        exitCode: code || 0,
+        exitCode,
         duration,
         pid,
         sessionId,
@@ -433,9 +438,6 @@ export async function executeClaudeStreaming(
 
     child.on("error", (error) => {
       const duration = Date.now() - startTime;
-
-      // 清理守护进程
-      cleanupProcess();
 
       resolve({
         success: false,
@@ -462,8 +464,8 @@ export async function executeClaudeCommand(
     projectDir,
     claudeBin: customClaudeBin,
     prompt,
-    workDir,
     headlessMode = true,
+    onPid,
   } = options;
   const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
 
@@ -532,7 +534,7 @@ end tell`;
             if (existsSync(scriptPath)) {
               unlinkSync(scriptPath);
             }
-          } catch (e) {
+          } catch {
             // 忽略删除失败
           }
         }, 5000);
@@ -550,12 +552,14 @@ end tell`;
           pid: undefined,
           sessionId: undefined, // 可视化模式下session ID在终端显示，不返回
         });
-      } catch (error: any) {
+      } catch (error: unknown) {
         const duration = Date.now() - startTime;
+        const message =
+          error instanceof Error ? error.message : "启动终端窗口失败";
         resolve({
           success: false,
-          output: error.message || "启动终端窗口失败",
-          error: error.message,
+          output: message,
+          error: message,
           exitCode: 1,
           duration,
           pid: undefined,
@@ -570,6 +574,7 @@ end tell`;
     tmpdir(),
     `claude-output-${Date.now()}-${process.pid}.json`,
   );
+  writeFileSync(tempOutputFile, "", "utf-8");
 
   // 启动实时日志流
   if (logger) {
@@ -580,61 +585,66 @@ end tell`;
     let pid: number | undefined;
 
     try {
-      // 使用 bash 包装，直接重定向到文件（不使用 tee，避免 Cloud Code 进入交互模式）
-      // 2>&1 将 stderr 重定向到 stdout，然后 > 重定向到文件
-      const bashCommand = `cd "${projectDir}" && "${claudeBin}" --print --dangerously-skip-permissions --output-format json "${prompt.replace(/"/g, '\\"')}" > "${tempOutputFile}" 2>&1`;
-
-      const child = spawn("/bin/bash", ["-c", bashCommand], {
-        cwd: projectDir,
-        env: { ...process.env, ...projectEnv },
-        detached: false,
-        stdio: "ignore", // 不使用父进程的 stdio
-      });
+      // 使用参数数组传递 prompt，避免 shell 转义和注入问题
+      const child = spawn(
+        claudeBin,
+        [
+          "--print",
+          "--dangerously-skip-permissions",
+          "--output-format",
+          "json",
+          prompt,
+        ],
+        {
+          cwd: projectDir,
+          env: { ...process.env, ...projectEnv },
+          detached: false,
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
 
       pid = child.pid;
+      if (pid) {
+        onPid?.(pid);
+      }
 
       // 立即记录执行开始事件（含临时输出文件路径，用于 PID 检测恢复）
       if (logger && logger.logExecuting) {
         logger.logExecuting(prompt, pid, tempOutputFile);
       }
 
-      // 清理函数：终止 Claude CLI 守护进程
-      function cleanupProcess() {
-        if (pid) {
-          try {
-            // 首先尝试正常终止进程
-            process.kill(pid, "SIGTERM");
-          } catch {
-            // 进程可能已经结束，忽略错误
-          }
+      let stdout = "";
+      let stderr = "";
 
-          // 延迟后强制终止（如果还没退出）
-          setTimeout(() => {
-            try {
-              process.kill(pid, "SIGKILL");
-            } catch {
-              // 进程已结束，忽略错误
-            }
-          }, 1000);
-        }
-      }
+      child.stdout?.on("data", (data: Buffer) => {
+        const text = data.toString();
+        stdout += text;
+        appendFileSync(tempOutputFile, text, "utf-8");
+      });
+
+      child.stderr?.on("data", (data: Buffer) => {
+        const text = data.toString();
+        stderr += text;
+        appendFileSync(tempOutputFile, text, "utf-8");
+      });
 
       // 监听进程结束
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
         const duration = Date.now() - startTime;
         let output = "";
         let sessionId: string | undefined;
-        let exitCode = code || 0;
+        const exitCode = code ?? (signal ? 1 : 0);
         let apiSuccess: boolean | undefined;
 
         try {
           // 读取完整输出
           if (existsSync(tempOutputFile)) {
-            const rawOutput = readFileSync(tempOutputFile, "utf-8");
+            const rawOutput =
+              stdout + stderr || readFileSync(tempOutputFile, "utf-8");
 
-            // 尝试解析 JSON 输出
+            // 尝试解析 stdout 中的 JSON 输出，避免 stderr 警告破坏解析
             try {
-              const jsonOutput = JSON.parse(rawOutput);
+              const jsonOutput = JSON.parse(stdout);
 
               // 提取 session_id
               if (jsonOutput.session_id) {
@@ -654,7 +664,7 @@ end tell`;
                 // 如果没有 result 字段,使用原始输出
                 output = rawOutput;
               }
-            } catch (parseError) {
+            } catch {
               // JSON 解析失败,使用原始输出(可能是错误信息)
               output = rawOutput;
             }
@@ -662,15 +672,13 @@ end tell`;
 
           // 清理临时文件
           if (existsSync(tempOutputFile)) unlinkSync(tempOutputFile);
-        } catch (error) {
+        } catch {
           // 清理失败不影响结果
         }
 
-        // 清理守护进程
-        cleanupProcess();
-
         // 优先使用 apiSuccess 判断成功与否（如果可用），否则使用 exitCode
-        const isSuccess = apiSuccess !== undefined ? apiSuccess : exitCode === 0;
+        const isSuccess =
+          apiSuccess !== undefined ? apiSuccess : exitCode === 0;
 
         resolve({
           success: isSuccess,
@@ -690,10 +698,9 @@ end tell`;
         // 清理临时文件
         try {
           if (existsSync(tempOutputFile)) unlinkSync(tempOutputFile);
-        } catch {}
-
-        // 清理守护进程
-        cleanupProcess();
+        } catch {
+          // 忽略清理失败
+        }
 
         resolve({
           success: false,
@@ -704,19 +711,22 @@ end tell`;
           pid,
         });
       });
-    } catch (error: any) {
+    } catch (error: unknown) {
       // 启动失败
       const duration = Date.now() - startTime;
+      const message = error instanceof Error ? error.message : "执行失败";
 
       // 清理临时文件
       try {
         if (existsSync(tempOutputFile)) unlinkSync(tempOutputFile);
-      } catch {}
+      } catch {
+        // 忽略清理失败
+      }
 
       resolve({
         success: false,
-        output: error.message || "执行失败",
-        error: error.message,
+        output: message,
+        error: message,
         exitCode: 1,
         duration,
         pid,
@@ -727,8 +737,14 @@ end tell`;
 
 export function getRunId(): string {
   const now = new Date();
-  const date = now.toISOString().split("T")[0].replace(/-/g, "");
+  const date = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, "0"),
+    String(now.getDate()).padStart(2, "0"),
+  ].join("");
   const time = now.toTimeString().split(" ")[0].replace(/:/g, "");
+  const millis = String(now.getMilliseconds()).padStart(3, "0");
   const pid = process.pid.toString().slice(-4);
-  return `run_${date}_${time}_${pid}`;
+  const random = Math.random().toString(36).slice(2, 6);
+  return `run_${date}_${time}${millis}_${pid}_${random}`;
 }
