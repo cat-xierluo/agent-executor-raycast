@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { LOG_DIR } from "./logger";
 import { countRunningCommands } from "./status";
-import { GetPreferenceValues } from "@raycast/api";
+import { getPreferenceValues } from "@raycast/api";
 
 const QUEUE_FILE = join(LOG_DIR, "task-queue.json");
 
@@ -40,7 +40,7 @@ function generateTaskId(): string {
 
 export function getConcurrencyLimit(): number {
   try {
-    const prefs = GetPreferenceValues<Record<string, string>>();
+    const prefs = getPreferenceValues<{ concurrencyLimit?: string }>();
     return parseInt(prefs.concurrencyLimit || "5", 10);
   } catch {
     return 5;
@@ -166,9 +166,7 @@ export function restoreAndSchedule(): void {
   const oneDayAgo = new Date();
   oneDayAgo.setHours(oneDayAgo.getHours() - 24);
   const before = data.tasks.length;
-  data.tasks = data.tasks.filter(
-    (t) => new Date(t.queuedAt) >= oneDayAgo,
-  );
+  data.tasks = data.tasks.filter((t) => new Date(t.queuedAt) >= oneDayAgo);
   if (data.tasks.length !== before) {
     writeQueueFile(data);
   }

@@ -1,12 +1,28 @@
-import { Form, showToast, Toast, ActionPanel, Action, Icon, openCommandPreferences } from "@raycast/api";
+import {
+  Form,
+  showToast,
+  Toast,
+  ActionPanel,
+  Action,
+  Icon,
+  openCommandPreferences,
+} from "@raycast/api";
 import { useState, useEffect } from "react";
-import { isValidSkillDir, importSkill, importSkillFromUrl } from "./utils/skills";
+import {
+  isValidSkillDir,
+  importSkill,
+  importSkillFromUrl,
+} from "./utils/skills";
 import { getConfig } from "./utils/claude";
-import { existsSync } from "fs";
 import { resolve } from "path";
 
 function isLocalPath(input: string): boolean {
-  return input.startsWith("/") || input.startsWith("~") || input.startsWith("./") || input.startsWith("../");
+  return (
+    input.startsWith("/") ||
+    input.startsWith("~") ||
+    input.startsWith("./") ||
+    input.startsWith("../")
+  );
 }
 
 export default function ImportSkill() {
@@ -14,7 +30,9 @@ export default function ImportSkill() {
   const [sourceDir, setSourceDir] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [targetProjectDir, setTargetProjectDir] = useState<string>("");
-  const [projectDirs, setProjectDirs] = useState<{ title: string; value: string }[]>([]);
+  const [projectDirs, setProjectDirs] = useState<
+    { title: string; value: string }[]
+  >([]);
 
   useEffect(() => {
     const config = getConfig();
@@ -34,12 +52,19 @@ export default function ImportSkill() {
   // 实时校验地址栏输入的本地路径
   const trimmedAddress = address.trim();
   const addressIsLocal = trimmedAddress ? isLocalPath(trimmedAddress) : false;
-  const addressLocalPath = addressIsLocal ? resolve(trimmedAddress.replace(/^~/, process.env.HOME || "~")) : "";
-  const addressLocalValid = addressLocalPath ? isValidSkillDir(addressLocalPath) : null;
+  const addressLocalPath = addressIsLocal
+    ? resolve(trimmedAddress.replace(/^~/, process.env.HOME || "~"))
+    : "";
+  const addressLocalValid = addressLocalPath
+    ? isValidSkillDir(addressLocalPath)
+    : null;
 
   async function handleSubmit() {
     if (!targetProjectDir) {
-      await showToast({ style: Toast.Style.Failure, title: "请选择目标项目目录" });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "请选择目标项目目录",
+      });
       return;
     }
 
@@ -49,19 +74,37 @@ export default function ImportSkill() {
         // 本地路径 → 直接创建符号链接
         const result = importSkill(addressLocalPath, targetProjectDir);
         if (result.success) {
-          await showToast({ style: Toast.Style.Success, title: result.message });
+          await showToast({
+            style: Toast.Style.Success,
+            title: result.message,
+          });
         } else {
-          await showToast({ style: Toast.Style.Failure, title: "导入失败", message: result.message });
+          await showToast({
+            style: Toast.Style.Failure,
+            title: "导入失败",
+            message: result.message,
+          });
         }
       } else {
         // 远程 URL → clone 后创建符号链接
         setIsLoading(true);
         try {
-          const result = await importSkillFromUrl(trimmedAddress, targetProjectDir);
+          const result = await importSkillFromUrl(
+            trimmedAddress,
+            targetProjectDir,
+          );
           if (result.success) {
-            await showToast({ style: Toast.Style.Success, title: "导入成功", message: result.message });
+            await showToast({
+              style: Toast.Style.Success,
+              title: "导入成功",
+              message: result.message,
+            });
           } else {
-            await showToast({ style: Toast.Style.Failure, title: "导入失败", message: result.message });
+            await showToast({
+              style: Toast.Style.Failure,
+              title: "导入失败",
+              message: result.message,
+            });
           }
         } catch (error) {
           await showToast({
@@ -78,12 +121,18 @@ export default function ImportSkill() {
 
     // 地址栏为空时使用文件选择器
     if (!selectedPath) {
-      await showToast({ style: Toast.Style.Failure, title: "请输入地址或选择 Skill 目录" });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "请输入地址或选择 Skill 目录",
+      });
       return;
     }
 
     if (!isLocalValid) {
-      await showToast({ style: Toast.Style.Failure, title: "所选目录不是有效的 Skill（缺少 skill.md）" });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "所选目录不是有效的 Skill（缺少 skill.md）",
+      });
       return;
     }
 
@@ -91,7 +140,11 @@ export default function ImportSkill() {
     if (result.success) {
       await showToast({ style: Toast.Style.Success, title: result.message });
     } else {
-      await showToast({ style: Toast.Style.Failure, title: "导入失败", message: result.message });
+      await showToast({
+        style: Toast.Style.Failure,
+        title: "导入失败",
+        message: result.message,
+      });
     }
   }
 
@@ -100,7 +153,11 @@ export default function ImportSkill() {
       <Form
         actions={
           <ActionPanel>
-            <Action title="打开扩展设置" onAction={openCommandPreferences} icon={Icon.Gear} />
+            <Action
+              title="打开扩展设置"
+              onAction={openCommandPreferences}
+              icon={Icon.Gear}
+            />
           </ActionPanel>
         }
       >
@@ -114,7 +171,11 @@ export default function ImportSkill() {
       isLoading={isLoading}
       actions={
         <ActionPanel>
-          <Action.SubmitForm title="导入 Skill" icon={Icon.Download} onAction={handleSubmit} />
+          <Action.SubmitForm
+            title="导入 Skill"
+            icon={Icon.Download}
+            onSubmit={handleSubmit}
+          />
         </ActionPanel>
       }
     >
