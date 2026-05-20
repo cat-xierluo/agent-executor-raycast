@@ -15,18 +15,21 @@
       "name": "commands",
       "title": "Agent Executor",
       "description": "选择技能并输入附加留言后执行",
+      "icon": "terminal.png",
       "mode": "view"
     },
     {
       "name": "import-skill",
       "title": "导入 Skill",
       "description": "从本地目录或 URL 链接导入 Skill",
+      "icon": "terminal.png",
       "mode": "view"
     },
     {
       "name": "status",
       "title": "Agent 运行状态",
       "description": "查看技能执行历史、运行状态和统计信息",
+      "icon": "terminal.png",
       "mode": "view"
     }
   ],
@@ -79,6 +82,7 @@
       "type": "checkbox",
       "required": false,
       "title": "后台运行模式",
+      "label": "启用后台运行模式",
       "description": "启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。",
       "default": true
     },
@@ -87,6 +91,7 @@
       "type": "checkbox",
       "required": false,
       "title": "启用默认 Skills 目录",
+      "label": "扫描 ~/.claude/skills/",
       "description": "自动扫描 ~/.claude/skills/ 目录中的 Skills",
       "default": true
     },
@@ -95,6 +100,7 @@
       "type": "checkbox",
       "required": false,
       "title": "流式输出模式",
+      "label": "实时显示 Claude 输出",
       "description": "实时显示 Claude 的输出（类似 SkillLauncher）",
       "default": false
     },
@@ -106,11 +112,26 @@
       "description": "同时运行的最大 Agent 数量，超出部分排队等待",
       "default": "5",
       "data": [
-        { "title": "1（串行）", "value": "1" },
-        { "title": "3", "value": "3" },
-        { "title": "5（推荐）", "value": "5" },
-        { "title": "10", "value": "10" },
-        { "title": "15", "value": "15" }
+        {
+          "title": "1（串行）",
+          "value": "1"
+        },
+        {
+          "title": "3",
+          "value": "3"
+        },
+        {
+          "title": "5（推荐）",
+          "value": "5"
+        },
+        {
+          "title": "10",
+          "value": "10"
+        },
+        {
+          "title": "15",
+          "value": "15"
+        }
       ]
     }
   ],
