@@ -2,6 +2,22 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [0.9.1] - 2026-05-20
+
+### 修复 (Fixed)
+
+- **Raycast 命令入口图标不显示**：为三个命令入口补充 `icon` 配置，并将项目内已设计的 `terminal.png` 同步到 Raycast 会读取的 `assets/terminal.png`。
+- **类型检查失败**：修复 `Action.SubmitForm`、`List.Section`、`getPreferenceValues` 的 API 使用问题，`npm run typescript` 现已通过。
+- **Lint 配置缺失**：补充 ESLint 9 使用的 `eslint.config.js`，避免 Raycast lint 找不到配置文件。
+- **命令执行转义问题**：后台和流式执行改为直接传递参数给 Claude CLI，避免附加留言中的引号、反引号、美元符号等破坏 shell 命令。
+- **运行状态误判**：修复状态恢复逻辑把工作目录当作目标文件检测的问题，降低已结束任务被误判为成功的风险。
+- **取消执行失效**：执行开始后立即记录真实 PID，使“取消执行”可以终止正在运行的任务。
+
+### 优化 (Improved)
+
+- **运行 ID 唯一性**：Run ID 增加毫秒和随机片段，避免同一秒内并发任务写入同一个日志分组。
+- **默认 Skills 目录**：`~/.claude/skills/` 偏好设置现在会参与技能扫描，并兼容符号链接和小写 `skill.md`。
+
 ## [0.9.0] - 2026-05-04
 
 ### 新增 (Added)
