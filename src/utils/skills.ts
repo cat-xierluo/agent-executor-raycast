@@ -1,5 +1,14 @@
-import { readdirSync, readFileSync, existsSync, lstatSync, symlinkSync, mkdirSync, rmSync, cpSync } from "fs";
-import { join, basename, resolve, dirname } from "path";
+import {
+  readdirSync,
+  readFileSync,
+  existsSync,
+  lstatSync,
+  symlinkSync,
+  mkdirSync,
+  rmSync,
+  cpSync,
+} from "fs";
+import { join, basename, resolve } from "path";
 import { Icon } from "@raycast/api";
 import { execSync } from "child_process";
 import { homedir } from "os";
@@ -33,17 +42,18 @@ export interface ClaudeSkill {
  * 2. .claude 子目录下包含 skill.md 或 SKILL.md
  */
 export function isValidSkillDir(skillPath: string): boolean {
-  const skillMd = join(skillPath, "skill.md");
-  const skillMdUpper = join(skillPath, "SKILL.md");
-  const claudeSkillMd = join(skillPath, ".claude", "skill.md");
-  const claudeSkillMdUpper = join(skillPath, ".claude", "SKILL.md");
+  return findSkillFile(skillPath) !== null;
+}
 
-  return (
-    existsSync(skillMd) ||
-    existsSync(skillMdUpper) ||
-    existsSync(claudeSkillMd) ||
-    existsSync(claudeSkillMdUpper)
-  );
+function findSkillFile(skillPath: string): string | null {
+  const candidates = [
+    join(skillPath, "skill.md"),
+    join(skillPath, "SKILL.md"),
+    join(skillPath, ".claude", "skill.md"),
+    join(skillPath, ".claude", "SKILL.md"),
+  ];
+
+  return candidates.find((candidate) => existsSync(candidate)) || null;
 }
 
 /**
@@ -58,19 +68,17 @@ function isSymlink(path: string): boolean {
   }
 }
 
-/**
- * 扫描单个项目的 .claude/skills/ 目录
- */
-function scanSingleProjectSkills(projectDir: string): ClaudeSkill[] {
-  const skillsDir = join(projectDir, ".claude/skills");
-
+function scanSkillsDirectory(
+  skillsDir: string,
+  projectDir: string,
+  projectName: string,
+): ClaudeSkill[] {
   if (!existsSync(skillsDir)) {
     return [];
   }
 
   const entries = readdirSync(skillsDir, { withFileTypes: true });
   const skills: ClaudeSkill[] = [];
-  const projectName = getProjectName(projectDir);
 
   for (const entry of entries) {
     // 跳过非目录项（包括符号链接，它们既不是目录也不是文件）
@@ -88,10 +96,9 @@ function scanSingleProjectSkills(projectDir: string): ClaudeSkill[] {
       continue;
     }
 
-    // 查找 skill.md 或 SKILL.md
-    let skillFile = join(skillDir, "skill.md");
-    if (!existsSync(skillFile)) {
-      skillFile = join(skillDir, "SKILL.md");
+    const skillFile = findSkillFile(skillDir);
+    if (!skillFile) {
+      continue;
     }
 
     // 读取技能定义文件
@@ -134,15 +141,35 @@ function scanSingleProjectSkills(projectDir: string): ClaudeSkill[] {
 }
 
 /**
+ * 扫描单个项目的 .claude/skills/ 目录
+ */
+function scanSingleProjectSkills(projectDir: string): ClaudeSkill[] {
+  return scanSkillsDirectory(
+    join(projectDir, ".claude/skills"),
+    projectDir,
+    getProjectName(projectDir),
+  );
+}
+
+/**
  * 扫描多个项目目录，获取所有可用的技能
  * 带缓存：10 秒内重复调用直接返回缓存结果
  */
 let skillsCache: ClaudeSkill[] | null = null;
 let skillsCacheTime = 0;
+let skillsCacheKey = "";
 const SKILLS_CACHE_TTL = 10000;
 
-export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
-  if (skillsCache && Date.now() - skillsCacheTime < SKILLS_CACHE_TTL) {
+export function scanSkills(
+  projectDirs: string[],
+  standaloneSkillsDirs: string[] = [],
+): ClaudeSkill[] {
+  const cacheKey = JSON.stringify({ projectDirs, standaloneSkillsDirs });
+  if (
+    skillsCache &&
+    skillsCacheKey === cacheKey &&
+    Date.now() - skillsCacheTime < SKILLS_CACHE_TTL
+  ) {
     return skillsCache;
   }
 
@@ -151,6 +178,18 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
   for (const dir of projectDirs) {
     const skills = scanSingleProjectSkills(dir);
     allSkills.push(...skills);
+  }
+
+  const defaultExecutionProjectDir = projectDirs[0];
+  if (defaultExecutionProjectDir) {
+    for (const dir of standaloneSkillsDirs) {
+      const skills = scanSkillsDirectory(
+        dir,
+        defaultExecutionProjectDir,
+        "默认 Skills",
+      );
+      allSkills.push(...skills);
+    }
   }
 
   // 应用元数据（复用现有逻辑）
@@ -180,7 +219,8 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
     if (!a.isNew && b.isNew) return 1;
 
     // 3. 使用频次（高频在前）
-    if (a.executions !== b.executions) return (b.executions || 0) - (a.executions || 0);
+    if (a.executions !== b.executions)
+      return (b.executions || 0) - (a.executions || 0);
 
     // 4. 名称字母序
     return a.name.localeCompare(b.name);
@@ -188,12 +228,14 @@ export function scanSkills(projectDirs: string[]): ClaudeSkill[] {
 
   skillsCache = sorted;
   skillsCacheTime = Date.now();
+  skillsCacheKey = cacheKey;
   return sorted;
 }
 
 export function invalidateSkillsCache(): void {
   skillsCache = null;
   skillsCacheTime = 0;
+  skillsCacheKey = "";
 }
 
 /**
@@ -215,7 +257,7 @@ function extractSkillInfo(
 
   // 尝试解析 frontmatter (YAML 格式: ---\nkey: value\n---)
   let inFrontmatter = false;
-  let frontmatterRawLines: string[] = [];
+  const frontmatterRawLines: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
@@ -247,7 +289,8 @@ function extractSkillInfo(
             const descLines: string[] = [];
             for (
               let j = descLineIndex + 1;
-              j < frontmatterRawLines.length && frontmatterRawLines[j].startsWith("  ");
+              j < frontmatterRawLines.length &&
+              frontmatterRawLines[j].startsWith("  ");
               j++
             ) {
               descLines.push(frontmatterRawLines[j].trim());
@@ -373,7 +416,10 @@ export function readSkillContent(skillFile: string): string {
 /**
  * 导入外部 Skill 目录（创建符号链接）
  */
-export function importSkill(sourceDir: string, targetProjectDir: string): { success: boolean; message: string } {
+export function importSkill(
+  sourceDir: string,
+  targetProjectDir: string,
+): { success: boolean; message: string } {
   const resolvedSource = resolve(sourceDir);
   const resolvedTarget = resolve(targetProjectDir);
   const skillName = basename(resolvedSource);
@@ -381,11 +427,17 @@ export function importSkill(sourceDir: string, targetProjectDir: string): { succ
   const targetPath = join(skillsDir, skillName);
 
   if (!isValidSkillDir(resolvedSource)) {
-    return { success: false, message: "所选目录不是有效的 Skill（缺少 skill.md）" };
+    return {
+      success: false,
+      message: "所选目录不是有效的 Skill（缺少 skill.md）",
+    };
   }
 
   if (existsSync(targetPath)) {
-    return { success: false, message: `Skill "${skillName}" 已存在于目标项目中` };
+    return {
+      success: false,
+      message: `Skill "${skillName}" 已存在于目标项目中`,
+    };
   }
 
   // 确保 .claude/skills/ 目录存在
@@ -407,9 +459,13 @@ export function importSkill(sourceDir: string, targetProjectDir: string): { succ
 /**
  * 解析 GitHub URL，提取 repo 地址和子路径
  */
-function parseGitHubUrl(url: string): { repoUrl: string; subPath: string; branch: string } | null {
+function parseGitHubUrl(
+  url: string,
+): { repoUrl: string; subPath: string; branch: string } | null {
   // https://github.com/user/repo/tree/branch/path/to/skill
-  const treeMatch = url.match(/^https?:\/\/github\.com\/([^/]+\/[^/]+)\/tree\/([^/]+)\/?(.*)$/);
+  const treeMatch = url.match(
+    /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/tree\/([^/]+)\/?(.*)$/,
+  );
   if (treeMatch) {
     return {
       repoUrl: `https://github.com/${treeMatch[1]}.git`,
@@ -441,7 +497,12 @@ function findSkillDirs(rootDir: string): string[] {
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (entry.name.startsWith(".") && depth === 0 && entry.name !== ".claude") continue;
+        if (
+          entry.name.startsWith(".") &&
+          depth === 0 &&
+          entry.name !== ".claude"
+        )
+          continue;
         if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
 
         const fullPath = join(dir, entry.name);
@@ -475,7 +536,10 @@ export async function importSkillFromUrl(
   const resolvedTarget = resolve(targetProjectDir);
 
   if (!parsed) {
-    return { success: false, message: "不支持的 URL 格式。请输入 GitHub 仓库链接。" };
+    return {
+      success: false,
+      message: "不支持的 URL 格式。请输入 GitHub 仓库链接。",
+    };
   }
 
   // 从 repo URL 提取仓库名
@@ -492,11 +556,14 @@ export async function importSkillFromUrl(
     }
 
     // Clone 仓库
-    execSync(`git clone --depth 1 --branch ${parsed.branch} ${parsed.repoUrl} "${cloneDest}"`, {
-      timeout: 60000,
-      stdio: "pipe",
-    });
-  } catch (error) {
+    execSync(
+      `git clone --depth 1 --branch ${parsed.branch} ${parsed.repoUrl} "${cloneDest}"`,
+      {
+        timeout: 60000,
+        stdio: "pipe",
+      },
+    );
+  } catch {
     // 如果指定分支失败，尝试默认 clone
     try {
       if (existsSync(cloneDest)) {
@@ -529,7 +596,10 @@ export async function importSkillFromUrl(
 
   if (skillSourceDirs.length === 0) {
     rmSync(cloneDest, { recursive: true, force: true });
-    return { success: false, message: "仓库中未找到有效的 Skill（缺少 skill.md）" };
+    return {
+      success: false,
+      message: "仓库中未找到有效的 Skill（缺少 skill.md）",
+    };
   }
 
   // 导入找到的所有 skill
@@ -558,7 +628,7 @@ export async function importSkillFromUrl(
     try {
       symlinkSync(managedPath, targetPath);
       results.push(`"${skillName}" 导入成功`);
-    } catch (error) {
+    } catch {
       results.push(`"${skillName}" 创建链接失败`);
     }
   }
@@ -572,8 +642,14 @@ export async function importSkillFromUrl(
 
   const successCount = results.filter((r) => r.includes("导入成功")).length;
   if (successCount === 0) {
-    return { success: false, message: results.join("\n") || "未导入任何 Skill" };
+    return {
+      success: false,
+      message: results.join("\n") || "未导入任何 Skill",
+    };
   }
 
-  return { success: true, message: `成功导入 ${successCount} 个 Skill\n${results.join("\n")}` };
+  return {
+    success: true,
+    message: `成功导入 ${successCount} 个 Skill\n${results.join("\n")}`,
+  };
 }
