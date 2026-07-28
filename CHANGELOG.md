@@ -2,6 +2,23 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [Unreleased]
+
+### 新增 (Added)
+
+- **commandMetadata 泛型化**：`applyMetadataToCommands` 和 `applyMetadataToSkills` 函数改为泛型签名，保留调用者的具体类型信息。
+- **pdf-processor skill**：新增 pdf-processor 技能到 `.claude/skills/`。
+- **tingwu-asr 自动 watcher**：`--async` 提交后自动 fork `watch_active.sh`（15s 高频轮询 + 状态日志 + macOS 完成通知），不再依赖用户手动启动 `poll_tasks.py --monitor`。
+- **搜索栏直接输入 URL（解绑文件）**：主界面搜索栏现在自动识别 URL 前缀（`http://` `https://` `file://` `x-devonthink-item://`），识别后跳过必选文件检查，把 URL 与选中文件一起作为参数传给技能 prompt。
+  - 新增 `src/utils/urlDetector.ts`：`parseNoteInput()` 解析搜索栏，`isUrlOrPath()` 判定是否 URL 输入。
+  - `commands.tsx` 的 `executeSkill` / `executeFreeCommand` 同步接入 URL 解析；URL 之后的文本作为额外备注。
+  - 顶部 placeholder、ListItem subtitle、Action 标题提示同步更新，反映 URL 模式。
+
+### 优化 (Improved)
+
+- **TypeScript 类型安全**：为 logs-viewer、status、logger 添加 `JsonLogEvent`/`JsonLogEntry` 接口，替换 `any` 为具体类型；移除未使用的导入和变量。
+- **tingwu-asr 单任务查询**：`poll_tasks.py` 新增 `--once` 和 `--task-id <id>` 参数，新 session 续做时一句命令即可查询单任务状态；`watch_active.sh` 跨 session 持久化状态日志。
+
 ## [0.9.1] - 2026-05-20
 
 ### 修复 (Fixed)
@@ -11,7 +28,7 @@
 - **Lint 配置缺失**：补充 ESLint 9 使用的 `eslint.config.js`，避免 Raycast lint 找不到配置文件。
 - **命令执行转义问题**：后台和流式执行改为直接传递参数给 Claude CLI，避免附加留言中的引号、反引号、美元符号等破坏 shell 命令。
 - **运行状态误判**：修复状态恢复逻辑把工作目录当作目标文件检测的问题，降低已结束任务被误判为成功的风险。
-- **取消执行失效**：执行开始后立即记录真实 PID，使“取消执行”可以终止正在运行的任务。
+- **取消执行失效**：执行开始后立即记录真实 PID，使”取消执行”可以终止正在运行的任务。
 
 ### 优化 (Improved)
 

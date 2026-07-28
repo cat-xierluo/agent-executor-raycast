@@ -22,6 +22,7 @@ import {
 import { RunLogger } from "./utils/logger";
 import { scanSkills, ClaudeSkill } from "./utils/skills";
 import { toggleSkillPinned, toggleSkillNew } from "./utils/commandMetadata";
+import { parseNoteInput } from "./utils/urlDetector";
 import {
   getSelectedDevonThinkRecords,
   checkDevonThinkAvailable,
@@ -325,12 +326,14 @@ export default function CommandList() {
   async function executeFreeCommand() {
     if (processingCommand.some((c) => c.name === "free-command")) return;
 
-    const userPrompt = note.trim();
-    if (!userPrompt) {
+    // 解析搜索栏：分离 URL 与剩余备注
+    const { url: urlArg, note: trimmedNote } = parseNoteInput(note);
+
+    if (!trimmedNote && !urlArg) {
       await showToast({
         style: Toast.Style.Failure,
         title: "未输入指令",
-        message: "请在搜索框中输入你的要求",
+        message: "请在搜索框输入指令或 URL",
       });
       return;
     }
@@ -380,13 +383,19 @@ export default function CommandList() {
       }
     }
 
+    // 收集所有输入参数：本地文件 + URL
+    const allInputs = [...exportedPaths];
+    if (urlArg) {
+      allInputs.push(urlArg);
+    }
+
     const toast = await showToast({
       style: Toast.Style.Animated,
       title: "正在执行自由指令",
       message:
-        validFiles.length === 1
-          ? validFiles[0].split("/").pop()
-          : `${validFiles.length} 个文件`,
+        allInputs.length === 1
+          ? allInputs[0].split("/").pop() || allInputs[0]
+          : `${allInputs.length} 个输入`,
     });
 
     const executionStartTime = Date.now();
@@ -395,11 +404,13 @@ export default function CommandList() {
     try {
       const projectDir = config.projectDirs[0];
 
-      // 构建 prompt: 多文件支持
-      const prompt =
-        exportedPaths.length > 0
-          ? `${userPrompt} ${exportedPaths.map((f) => `"${f}"`).join(" ")}`
-          : userPrompt;
+      // 构建 prompt：多文件 + URL
+      const allArgs = allInputs.map((f) => `"${f}"`).join(" ");
+      const prompt = trimmedNote
+        ? allArgs
+          ? `${trimmedNote} ${allArgs}`
+          : trimmedNote
+        : allArgs;
 
       // 用于日志和排队的单个文件路径（取第一个）
       const actualFilePath = exportedPaths[0] || "";
@@ -419,8 +430,8 @@ export default function CommandList() {
           claudeBin: config.claudeBin,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
-          targetFilePath: actualFilePath,
-          note: userPrompt,
+          targetFilePath: actualFilePath || undefined,
+          note: trimmedNote || undefined,
         });
         setQueuedTasks(getQueuedTasks());
         await showToast({
@@ -565,6 +576,9 @@ export default function CommandList() {
   async function executeSkill(skill: ClaudeSkill) {
     if (processingCommand.some((c) => c.name === skill.name)) return;
 
+    // 解析搜索栏：分离 URL 与剩余备注
+    const { url: urlArg, note: trimmedNote } = parseNoteInput(note);
+
     const needsFile = !SKILLS_NO_FILE_REQUIRED.includes(skill.name);
 
     // 文件检查
@@ -573,11 +587,13 @@ export default function CommandList() {
     );
     const executionFile = validFiles[0];
 
-    if (needsFile && !executionFile) {
+    // URL 可替代必选文件检查
+    if (needsFile && !executionFile && !urlArg) {
       await showToast({
         style: Toast.Style.Failure,
         title: "未选择文件",
-        message: "请在 Finder、DEVONthink 或 VS Code 中选择文件后重试",
+        message:
+          "请在 Finder、DEVONthink 或 VS Code 中选择文件，或在搜索栏输入 URL",
       });
       return;
     }
@@ -655,13 +671,19 @@ export default function CommandList() {
       // 构建 prompt
       let prompt = `/${skill.name}`;
 
-      if (needsFile && exportedPaths.length > 0) {
-        // 多文件支持：传递所有文件（已导出的 DEVONthink 路径或原始路径）
-        prompt += " " + exportedPaths.map((f) => `"${f}"`).join(" ");
+      // 收集所有输入参数：本地文件 + URL
+      const allInputs = [...exportedPaths];
+      if (urlArg) {
+        allInputs.push(urlArg);
       }
 
-      if (note && note.trim()) {
-        prompt += ` ${note.trim()}`;
+      if (allInputs.length > 0) {
+        // 多文件/URL 支持：传递所有文件（已导出的 DEVONthink 路径或原始路径）和 URL
+        prompt += " " + allInputs.map((f) => `"${f}"`).join(" ");
+      }
+
+      if (trimmedNote) {
+        prompt += ` ${trimmedNote}`;
       }
 
       // 并发数检查（在创建 RunLogger 之前，避免 orphan started 事件）
@@ -680,7 +702,7 @@ export default function CommandList() {
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
           targetFilePath: actualFilePath || undefined,
-          note: note.trim() || undefined,
+          note: trimmedNote || undefined,
         });
         setQueuedTasks(getQueuedTasks());
         await showToast({
@@ -855,7 +877,7 @@ export default function CommandList() {
   return (
     <List
       isLoading={isLoading}
-      searchBarPlaceholder="附加留言（输入偏好、方向等备注）..."
+      searchBarPlaceholder="附加留言 / URL（http:// https:// file:// x-devonthink-item://）..."
       searchText={note}
       onSearchTextChange={setNote}
       actions={
@@ -978,13 +1000,21 @@ export default function CommandList() {
       ) : (
         <List.Section
           title={`可用技能 (${items.length})`}
-          subtitle={
-            selectedFiles.length > 0
-              ? selectedFiles.length === 1
+          subtitle={(() => {
+            const { url: urlInSearch } = parseNoteInput(note);
+            if (urlInSearch && selectedFiles.length > 0) {
+              return `将对 ${selectedFiles.length} 个文件 + URL 执行`;
+            }
+            if (urlInSearch) {
+              return `将对 URL 执行`;
+            }
+            if (selectedFiles.length > 0) {
+              return selectedFiles.length === 1
                 ? `将对 "${selectedFiles[0].split("/").pop() || selectedFiles[0]}" 执行`
-                : `将对 ${selectedFiles.length} 个文件执行`
-              : "请先在 DEVONthink、Finder 或 VS Code 中选择文件"
-          }
+                : `将对 ${selectedFiles.length} 个文件执行`;
+            }
+            return "请先在 Finder/DEVONthink/VS Code 选择文件，或在搜索栏输入 URL";
+          })()}
         >
           {(runningCount > 0 || queuedTasks.length > 0) && (
             <ListItem
@@ -1024,54 +1054,88 @@ export default function CommandList() {
           )}
 
           {/* 自由指令入口 - 始终显示 */}
-          <ListItem
-            id="free-command"
-            title={`💬 ${note.trim() ? `自由指令：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}` : "自由指令"}`}
-            subtitle={
-              note.trim()
-                ? selectedFiles.length === 1
-                  ? `将对 "${selectedFiles[0].split("/").pop()}" 执行`
-                  : selectedFiles.length > 1
-                    ? `将对 ${selectedFiles.length} 个文件执行`
-                    : "将对工作目录执行"
-                : selectedFiles.length > 0
-                  ? "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
-                  : "在搜索框输入你的指令，然后执行（Cmd+Shift+Enter）"
-            }
-            icon={Icon.SpeechBubble}
-            accessories={[
-              {
-                text: processingCommand.some((c) => c.name === "free-command")
-                  ? "执行中..."
-                  : undefined,
-                icon: processingCommand.some((c) => c.name === "free-command")
-                  ? Icon.CircleProgress
-                  : undefined,
-              },
-            ].filter(Boolean)}
-            actions={
-              <ActionPanel>
-                <Action
-                  title="执行自由指令"
-                  onAction={executeFreeCommand}
-                  icon={Icon.Play}
-                  shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
-                />
-                {note.trim() && (
-                  <Action
-                    title={`执行：${note.trim().substring(0, 30)}${note.trim().length > 30 ? "..." : ""}`}
-                    onAction={executeFreeCommand}
-                    icon={Icon.Play}
-                  />
-                )}
-              </ActionPanel>
-            }
-          />
+          {(() => {
+            const { url: urlInSearch, note: trimmedNoteInSearch } =
+              parseNoteInput(note);
+            const searchTitleText = trimmedNoteInSearch || urlInSearch || "";
+            const titleDisplay = searchTitleText
+              ? `自由指令：${searchTitleText.substring(0, 30)}${searchTitleText.length > 30 ? "..." : ""}`
+              : "自由指令";
+            const subtitleDisplay = (() => {
+              if (trimmedNoteInSearch || urlInSearch) {
+                const inputCount = selectedFiles.length + (urlInSearch ? 1 : 0);
+                if (inputCount === 1) {
+                  return urlInSearch
+                    ? `将对 URL 执行`
+                    : `将对 "${selectedFiles[0].split("/").pop()}" 执行`;
+                }
+                if (inputCount > 1) {
+                  return `将对 ${inputCount} 个输入执行`;
+                }
+                return "将对工作目录执行";
+              }
+              return "在搜索框输入指令或 URL，然后执行（Cmd+Shift+Enter）";
+            })();
+            return (
+              <ListItem
+                id="free-command"
+                title={`💬 ${titleDisplay}`}
+                subtitle={subtitleDisplay}
+                icon={Icon.SpeechBubble}
+                accessories={[
+                  {
+                    text: processingCommand.some(
+                      (c) => c.name === "free-command",
+                    )
+                      ? "执行中..."
+                      : undefined,
+                    icon: processingCommand.some(
+                      (c) => c.name === "free-command",
+                    )
+                      ? Icon.CircleProgress
+                      : undefined,
+                  },
+                ].filter(Boolean)}
+                actions={
+                  <ActionPanel>
+                    <Action
+                      title="执行自由指令"
+                      onAction={executeFreeCommand}
+                      icon={Icon.Play}
+                      shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
+                    />
+                    {searchTitleText && (
+                      <Action
+                        title={`执行：${searchTitleText.substring(0, 30)}${searchTitleText.length > 30 ? "..." : ""}`}
+                        onAction={executeFreeCommand}
+                        icon={Icon.Play}
+                      />
+                    )}
+                  </ActionPanel>
+                }
+              />
+            );
+          })()}
 
           {items.map((skill) => {
             const queuedItem = queuedTasks.find(
               (t) => t.skillName === skill.name,
             );
+            // 计算每个技能旁注的尾部提示：有 URL/备注/文件时显示将执行的输入
+            const { url: urlInSearch, note: trimmedNoteInSearch } =
+              parseNoteInput(note);
+            const inputTailLabel = (() => {
+              if (urlInSearch && trimmedNoteInSearch) {
+                return `🔗 ${urlInSearch.substring(0, 40)}${urlInSearch.length > 40 ? "..." : ""} · ${trimmedNoteInSearch.substring(0, 30)}${trimmedNoteInSearch.length > 30 ? "..." : ""}`;
+              }
+              if (urlInSearch) {
+                return `🔗 ${urlInSearch.substring(0, 60)}${urlInSearch.length > 60 ? "..." : ""}`;
+              }
+              if (trimmedNoteInSearch) {
+                return `📝 ${trimmedNoteInSearch.substring(0, 60)}${trimmedNoteInSearch.length > 60 ? "..." : ""}`;
+              }
+              return null;
+            })();
             return (
               <ListItem
                 key={skill.skillDir}
@@ -1096,6 +1160,9 @@ export default function CommandList() {
                     : null,
                   skill.executions && skill.executions > 0
                     ? { text: String(skill.executions) }
+                    : null,
+                  inputTailLabel
+                    ? { text: inputTailLabel, icon: Icon.Link }
                     : null,
                 ].filter(Boolean)}
                 actions={
@@ -1140,9 +1207,13 @@ export default function CommandList() {
                         shortcut={{ modifiers: ["ctrl"], key: "x" }}
                       />
                     )}
-                    {note && note.trim() && (
+                    {(urlInSearch || trimmedNoteInSearch) && (
                       <Action
-                        title={`执行技能（带备注："${note.trim()}"）`}
+                        title={
+                          urlInSearch
+                            ? `执行技能（URL：${urlInSearch.substring(0, 30)}${urlInSearch.length > 30 ? "..." : ""}）`
+                            : `执行技能（带备注："${trimmedNoteInSearch.substring(0, 30)}${trimmedNoteInSearch.length > 30 ? "..." : ""}"）`
+                        }
                         onAction={() => executeSkill(skill)}
                         icon={Icon.Play}
                         shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
