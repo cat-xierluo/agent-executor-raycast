@@ -13,6 +13,8 @@
   - 新增 `src/utils/urlDetector.ts`：`parseNoteInput()` 解析搜索栏，`isUrlOrPath()` 判定是否 URL 输入。
   - `commands.tsx` 的 `executeSkill` / `executeFreeCommand` 同步接入 URL 解析；URL 之后的文本作为额外备注。
   - 顶部 placeholder、ListItem subtitle、Action 标题提示同步更新，反映 URL 模式。
+- **外部 URL 自动回填搜索栏**：`commands` 命令接入 `LaunchProps`，从 `fallbackText`（Raycast Selected Text 机制，浏览器选中 URL 后按热键）或 `arguments.url`（Quicklink / Universal Action 参数）预填搜索栏。`package.json` 中 `commands` 命令新增 `url` 文本参数。
+- **getSelectedText 主动捕获前台选中文本**：作为 fallbackText 之外的最佳努力补底，组件 mount 时调用 `getSelectedText()`。仅在搜索栏仍为空时回填，避免覆盖用户输入；promise reject 静默忽略。
 
 ### 优化 (Improved)
 

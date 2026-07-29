@@ -6,12 +6,14 @@ import {
   showToast,
   Toast,
   getSelectedFinderItems,
+  getSelectedText,
   Icon,
   closeMainWindow,
   showHUD,
   confirmAlert,
   openCommandPreferences,
   Detail,
+  LaunchProps,
 } from "@raycast/api";
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -61,7 +63,24 @@ const SKILLS_REQUIRE_CONFIRM: Record<
   "sync-external": { title: "同步外部文件", message: "确定要同步外部文件吗?" },
 };
 
-export default function CommandList() {
+/**
+ * 命令的启动参数。
+ * - `url` 来自 Quicklink / Universal Action 的参数传入。
+ * - `fallbackText` 来自 Raycast Selected Text 机制（浏览器选中 URL 后按热键）。
+ * 二者至少有一个时，会被预填到搜索栏。
+ */
+interface CommandArguments {
+  url?: string;
+}
+
+export default function CommandList(
+  props: LaunchProps<{ arguments: CommandArguments }>,
+) {
+  // 预填搜索栏：fallbackText（Selected Text）优先于 arguments.url（Quicklink 参数）
+  const initialNote = (props.fallbackText?.trim() ||
+    props.arguments?.url?.trim() ||
+    "") as string;
+
   const [items, setItems] = useState<ClaudeSkill[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedFiles, setSelectedFiles] = useState<string[]>([]);
@@ -71,7 +90,7 @@ export default function CommandList() {
   const [processingCommand, setProcessingCommand] = useState<
     { name: string; pid?: number }[]
   >([]);
-  const [note, setNote] = useState<string>("");
+  const [note, setNote] = useState<string>(initialNote);
   const [runningCount, setRunningCount] = useState<number>(0);
   const [totalExecutions, setTotalExecutions] = useState<number>(0);
   const [showAllFiles, setShowAllFiles] = useState<boolean>(false);
@@ -88,12 +107,26 @@ export default function CommandList() {
   const loadSelectedFilesRef = useRef<() => void>(loadSelectedFiles);
   const loadSkillsRef = useRef<() => void>(loadSkills);
   const loadRunningCountRef = useRef<() => void>(loadRunningCount);
+  const loadSelectedTextRef = useRef<() => Promise<void>>(async () => {});
 
   // 每次 render 更新 ref
   useEffect(() => {
     loadSelectedFilesRef.current = loadSelectedFiles;
     loadSkillsRef.current = loadSkills;
     loadRunningCountRef.current = loadRunningCount;
+    // 当搜索栏仍为空时，尝试从前台应用读取选中文本（如浏览器中选中的 URL）。
+    // 注意：Raycast 普通热键会立即抢焦点，浏览器文本可能读不到；这种场景下
+    // 用户应当使用 Raycast 的「Selected Text」热键，文本会通过 fallbackText 传入。
+    loadSelectedTextRef.current = async () => {
+      try {
+        const text = await getSelectedText();
+        if (text && text.trim()) {
+          setNote((current) => (current && current.trim() ? current : text));
+        }
+      } catch {
+        // 前台应用不支持或无选中文本，静默忽略
+      }
+    };
   });
 
   useEffect(() => {
@@ -102,6 +135,7 @@ export default function CommandList() {
     loadSelectedFilesRef.current();
     loadSkillsRef.current();
     loadRunningCountRef.current();
+    loadSelectedTextRef.current();
 
     // 初始化任务队列
     initQueue();

@@ -44,7 +44,10 @@ declare namespace Preferences {
 
 declare namespace Arguments {
   /** Arguments passed to the `commands` command */
-  export type Commands = {}
+  export type Commands = {
+  /** https://example.com/x.pdf */
+  "url": string
+}
   /** Arguments passed to the `import-skill` command */
   export type ImportSkill = {}
   /** Arguments passed to the `status` command */

@@ -47,3 +47,93 @@
 
 - `npm run typescript` 通过
 - `npm run lint` 仅遗留预先存在的 `package.json` author 404 警告（与本次改动无关）
+
+## 2026-07-29 — 主动捕获前台选中文本（getSelectedText fallback）
+
+### 背景
+
+`fallbackText` 只在用户使用「Selected Text」机制时才能拿到。普通 Extension Hotkey（用户实际使用的快捷键）不会传入任何上下文。
+
+`getSelectedFinderItems()` 是个特殊 API，不管 Finder 是否是前台都能读到选中文件；但 `getSelectedText()` 只读**当前**前台应用。Raycast 按下热键后会立刻抢焦点，所以理论上 `getSelectedText()` 大概率读不到浏览器文本。
+
+但加一层 best-effort fallback 仍有意义：
+- 部分用户的浏览器扩展可能在热键按下后保留「选中文本上下文」一小段时间
+- 部分场景（按下热键时机较慢、或浏览器把焦点让出时序差异）能拿到
+
+### 决策
+
+在 `commands.tsx` 组件 mount 时调用 `getSelectedText()`，搜索栏仍为空时回填。
+
+实现要点：
+
+1. 通过 `loadSelectedTextRef` 在 mount 时调用，避免在 `useState` 初始化时引入 async
+2. 用 functional `setNote` 判断搜索栏是否仍为空：用户已经输入则不覆盖
+3. `getSelectedText()` 失败时（无选中文本或应用不支持）静默忽略
+4. 不轮询：文本选择是一次性事件，不应周期性覆盖
+
+### 优先级
+
+```
+fallbackText       (Selected Text 热键)
+   ↓
+arguments.url      (Quicklink / Universal Action)
+   ↓
+getSelectedText()  (mount 时前台仍持有选中文本)
+   ↓
+""                 (用户手动输入)
+```
+
+### 已知限制
+
+- 普通热键按下后 Raycast 抢焦点，前台切换为 Raycast，浏览器文本读不到的概率较高
+- 此时仍然只能依赖：
+  1. 用户改用「Selected Text」热键
+  2. 或手动在搜索栏输入 URL
+  3. 或用剪贴板 fallback（暂未实现）
+
+### 验证
+
+- `npm run typescript` 通过
+- `npm run lint` 仅遗留预先存在的 `package.json` author 404 警告（与本次改动无关）
+
+## 2026-07-28 — 外部 URL 自动回填（LaunchProps 接入）
+
+### 背景
+
+当用户用快捷键触发 `commands` 命令时：
+- 从 Finder 选中文件触发 → `getSelectedFinderItems()` 自动加载文件路径
+- 从浏览器选中 URL 触发 → URL 既不写入搜索栏，也不被识别
+
+不对称导致用户用网页 URL 走快捷键时反而比直接输入还麻烦。
+
+### 决策
+
+让 `commands` 命令接收 `LaunchProps`，从外部来源预填搜索栏。
+
+实现要点：
+
+1. `src/commands.tsx`：
+   - `function CommandList(props: LaunchProps<{ arguments: CommandArguments }>)`
+   - 预填优先级：`props.fallbackText` > `props.arguments.url` > `""`
+   - `useState<string>(initialNote)` 初始化 `note`，保留用户后续编辑权
+
+2. `package.json`：
+   - `commands` 命令增加 `arguments: [{ name: "url", type: "text" }]`，让 Quicklink / Universal Action 可以传 URL 参数
+
+### 三种 URL 来源
+
+| 来源 | 触发方式 | 传递字段 |
+|---|---|---|
+| 浏览器 Selected Text | 选中 URL 后按 Raycast 热键 | `fallbackText` |
+| Quicklink | Quicklink 触发命令并传参 | `arguments.url` |
+| 直接输入 | Raycast 打开命令后键盘输入 | 搜索栏手动输入 |
+
+### 兼容性
+
+- `fallbackText` 为 `undefined` 时降级到 `arguments.url`，再降级到空字符串。
+- `useState` 初值仅在首次渲染时生效，用户在搜索栏中编辑后不会被 LaunchProps 覆盖。
+
+### 验证
+
+- `npm run typescript` 通过
+- `npm run lint` 仅遗留预先存在的 `package.json` author 404 警告（与本次改动无关）

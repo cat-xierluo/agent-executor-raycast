@@ -16,7 +16,16 @@
       "title": "Agent Executor",
       "description": "选择技能并输入附加留言后执行",
       "icon": "terminal.png",
-      "mode": "view"
+      "mode": "view",
+      "arguments": [
+        {
+          "name": "url",
+          "type": "text",
+          "required": false,
+          "placeholder": "https://example.com/x.pdf",
+          "description": "可选：直接传入 URL 作为技能输入（也支持浏览器 Selected Text 经 fallbackText 自动传入）"
+        }
+      ]
     },
     {
       "name": "import-skill",
