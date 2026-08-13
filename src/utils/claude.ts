@@ -29,6 +29,7 @@ export interface Preferences {
   headlessMode?: boolean;
   enableDefaultSkills?: boolean; // 新增：是否启用默认 ~/.claude/skills/
   streamingMode?: boolean; // 新增：是否启用流式输出
+  headlessPreamble?: string; // 无头模式注入的系统级前置指令（留空走内置默认）
 }
 
 /**
@@ -253,6 +254,34 @@ function getProjectEnv(projectDir: string): Record<string, string> {
   return env;
 }
 
+/**
+ * 无头模式默认前置系统指令。
+ * 在后台（无头）启动时注入，压制不必要的提问/确认，并预设外传授权与输出规范。
+ * 用户可在 Raycast 偏好"无头模式前置指令"中整体覆盖；留空时使用本默认值。
+ */
+const DEFAULT_HEADLESS_PREAMBLE = `# 执行模式（最高优先级，覆盖各 skill 正文的冲突说明）
+本会话由 Raycast 无头模式自动启动，用户不在线，无法回复任何提问。
+1. 不向用户提问、不征求选择、不要求确认；遇到需要决策的情况，选择最合理默认值并继续执行。
+2. 任何需要上传或外传的已配置后端/服务（包括但不限于 PaddleOCR、MinerU 等云端 OCR 及其他联网 API）默认视为已获用户授权，直接使用；仅当用户本次留言明确要求保密/本地/离线时才改用纯本地方案。
+3. 本指令优先级高于任何 skill 正文中"先询问用户/等待确认/取得授权后再继续"的说明。
+4. CLI 命令产生的命名产出写入输入文件所在目录，文件名格式：YYMMDD 原名.扩展名。
+5. 仅当遇到真正无法自行决定、且不处理就无法继续的阻塞时才停下，并说明阻塞点和建议的默认值。
+完成后直接给出结果：做了什么、输出文件、验证情况、遗留风险。不要罗列选项让用户选。`;
+
+/**
+ * 解析无头模式前置指令：优先用 Raycast 偏好的自定义内容，否则用内置默认。
+ * 在 claude.ts 内部读取，使直接执行与排队执行两条路径都自动覆盖。
+ */
+function resolveHeadlessPreamble(): string {
+  try {
+    const prefs = getPreferenceValues<Preferences>();
+    const custom = (prefs.headlessPreamble || "").trim();
+    return custom || DEFAULT_HEADLESS_PREAMBLE;
+  } catch {
+    return DEFAULT_HEADLESS_PREAMBLE;
+  }
+}
+
 export async function executeClaudeStreaming(
   options: ClaudeStreamingOptions,
 ): Promise<ClaudeExecutionResult> {
@@ -291,23 +320,25 @@ export async function executeClaudeStreaming(
     let lineBuffer = ""; // 行缓冲，防止 JSON 在 TCP 分包时被截断
 
     // 使用参数数组传递 prompt，避免 shell 转义和注入问题
-    const child = spawn(
-      claudeBin,
-      [
-        "-p",
-        prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--include-partial-messages",
-      ],
-      {
-        cwd: projectDir,
-        env: { ...process.env, ...projectEnv },
-        detached: false,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    // 无头模式注入系统级前置指令（压制提问/预设外传授权），见 resolveHeadlessPreamble()
+    const streamArgs = [
+      "-p",
+      prompt,
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      "--include-partial-messages",
+    ];
+    const streamPreamble = resolveHeadlessPreamble();
+    if (streamPreamble) {
+      streamArgs.push("--append-system-prompt", streamPreamble);
+    }
+    const child = spawn(claudeBin, streamArgs, {
+      cwd: projectDir,
+      env: { ...process.env, ...projectEnv },
+      detached: false,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
 
     const pid = child.pid;
     if (pid) {
@@ -586,22 +617,24 @@ end tell`;
 
     try {
       // 使用参数数组传递 prompt，避免 shell 转义和注入问题
-      const child = spawn(
-        claudeBin,
-        [
-          "--print",
-          "--dangerously-skip-permissions",
-          "--output-format",
-          "json",
-          prompt,
-        ],
-        {
-          cwd: projectDir,
-          env: { ...process.env, ...projectEnv },
-          detached: false,
-          stdio: ["ignore", "pipe", "pipe"],
-        },
-      );
+      // 无头模式注入系统级前置指令（压制提问/预设外传授权），见 resolveHeadlessPreamble()
+      const printArgs = [
+        "--print",
+        "--dangerously-skip-permissions",
+        "--output-format",
+        "json",
+        prompt,
+      ];
+      const printPreamble = resolveHeadlessPreamble();
+      if (printPreamble) {
+        printArgs.push("--append-system-prompt", printPreamble);
+      }
+      const child = spawn(claudeBin, printArgs, {
+        cwd: projectDir,
+        env: { ...process.env, ...projectEnv },
+        detached: false,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
 
       pid = child.pid;
       if (pid) {

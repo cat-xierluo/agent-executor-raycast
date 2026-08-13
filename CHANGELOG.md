@@ -6,6 +6,11 @@
 
 ### 新增 (Added)
 
+- **无头模式系统级前置指令注入**：后台（无头）启动 Agent 时通过 Claude CLI 的 `--append-system-prompt` 注入一段系统级前置指令，解决此前 Agent 频繁回头向用户提问/要求确认（如 OCR 敏感材料外传授权）的问题。
+  - 新增 Raycast 偏好「无头模式前置指令」（`headlessPreamble`，textarea，可选）：用户可在设置中整体覆盖；留空使用内置默认。
+  - `src/utils/claude.ts` 新增 `DEFAULT_HEADLESS_PREAMBLE` 常量与 `resolveHeadlessPreamble()`，在流式（`-p`）与无头 print（`--print`）两个 spawn 点条件追加 `--append-system-prompt`；非无头的终端窗口路径不注入（用户在场可正常交互）。因在 `claude.ts` 内部读取偏好，直接执行与排队执行两条路径自动覆盖。
+  - 内置默认指令：声明无头模式用户不在线、不提问/不征求确认；**任何需外传的已配置后端/服务默认视为已授权**（不限于 PaddleOCR/MinerU，含其他联网 API），仅当用户留言明确要求保密/本地时才改纯本地；优先级高于 skill 正文中「先询问/等待确认」的说明；命名产出按 `YYMMDD 原名.扩展名` 写入输入文件目录。
+  - 已验证 `--append-system-prompt` 被接受且系统级指令可覆盖其他指令。
 - **commandMetadata 泛型化**：`applyMetadataToCommands` 和 `applyMetadataToSkills` 函数改为泛型签名，保留调用者的具体类型信息。
 - **pdf-processor skill**：新增 pdf-processor 技能到 `.claude/skills/`。
 - **tingwu-asr 自动 watcher**：`--async` 提交后自动 fork `watch_active.sh`（15s 高频轮询 + 状态日志 + macOS 完成通知），不再依赖用户手动启动 `poll_tasks.py --monitor`。
@@ -15,6 +20,14 @@
   - 顶部 placeholder、ListItem subtitle、Action 标题提示同步更新，反映 URL 模式。
 - **外部 URL 自动回填搜索栏**：`commands` 命令接入 `LaunchProps`，从 `fallbackText`（Raycast Selected Text 机制，浏览器选中 URL 后按热键）或 `arguments.url`（Quicklink / Universal Action 参数）预填搜索栏。`package.json` 中 `commands` 命令新增 `url` 文本参数。
 - **getSelectedText 主动捕获前台选中文本**：作为 fallbackText 之外的最佳努力补底，组件 mount 时调用 `getSelectedText()`。仅在搜索栏仍为空时回填，避免覆盖用户输入；promise reject 静默忽略。
+
+### 修复 (Fixed)
+
+- **DEVONthink 多文件选择导出失败**：在 DEVONthink 中选中 ≥2 个文件触发技能时报「导出文件失败: Command failed: osascript ...」。根因为三处缺陷叠加：
+  - **多记录分隔符（主因）**：`getSelectedDevonThinkRecords` 用 `resultList as string` 返回多条记录，假设分隔符为 `", "`，但 AppleScript 默认 `text item delimiters` 为空串，多记录会**粘连**。JS 端 `.split(", ")` 只得到 1 条字段错位的记录，使本有文件系统路径的记录被误判为 `x-devonthink-item://` URL，误触发 export 分支（单文件不受影响，故长期未暴露）。
+  - **export AppleScript 语法**：`get record at id "..."` 编译报 `-2741`；正确写法为 `get record with uuid "..."`，且取 `uuid of theRecord`（字符串）而非数字 `id`。
+  - **export 参数**：`export theRecord to file thePath` 漏掉命名参数 `record`，报「参数丢失」；依 sdef 签名应为 `export record <rec> to "<POSIX 目录>"`，命令返回实际导出路径（同名时自动加序号）。
+  - 附带修复 shell 单引号转义：`replace(/'/g, "\\'")` 在 shell 单引号串内无效，改为正确的 `'\''`，使含单引号的 AppleScript（如 `AppleScript's text item delimiters`）能正确传递；export 失败时一并透出 osascript 完整 stderr，便于后续诊断。
 
 ### 优化 (Improved)
 

@@ -2,6 +2,59 @@
 
 记录本项目的重要技术决策与工作摘要。
 
+## 2026-08-13 — 无头模式注入系统级前置指令（压制 Agent 提问 / 预设外传授权）
+
+### 背景
+
+用户经 Raycast 无头模式启动 Agent 处理含姓名、案号的法院文书（pdf-processor OCR），Agent 反复回头询问"是否允许外传 / 选 A 还是 B"，而用户在无头模式下不在线、无法回复，流程被卡死。根因：扩展启动时 prompt 为裸拼装（`/<skill> "<文件>" <留言>`），无任何系统级行为指令；而 pdf-processor 的 SKILL.md 写明"敏感材料上传前需取得确认"，Agent 照章提问。`--dangerously-skip-permissions` 只跳过工具权限弹窗，管不了 Agent 自身"是否询问"的判断。
+
+### 决策
+
+用 Claude CLI 的 `--append-system-prompt` 在**系统层**注入前置指令（优先级高于 skill 正文），而非拼到 user prompt 前。理由：系统层指令可压住 skill 正文里"先询问用户"的规则，是 Claude Code 的惯用机制。
+
+- 默认前置指令声明：无头模式用户不在线、不提问/不征求确认；**任何需外传的已配置后端/服务默认视为已授权**（不限 PaddleOCR/MinerU，含其他联网 API），仅当用户留言明确要求保密/本地才改纯本地；优先级高于 skill 中"先询问/确认"说明；命名产出按 `YYMMDD 原名.扩展名` 写入输入目录。
+- 暴露为 Raycast 偏好「无头模式前置指令」(textarea)，可整体覆盖；留空走内置默认。
+- 在 `claude.ts` 内部读取偏好，使直接执行与排队执行两条路径都自动覆盖；终端窗口（非无头）路径不注入（用户在场可正常交互）。
+
+### 验证
+
+实测 `--append-system-prompt` 被 CLI 接受，且系统级指令可覆盖其他指令（强制开头 token 测试通过）；`npm run build` 通过。
+
+### 重新评估条件
+
+若 Claude CLI 移除或更改 `--append-system-prompt` 语义；或前置指令与某 skill 的"必须人工确认"合规要求冲突（如真正须人工签字的法定场景），需改为按 skill 维度开关注入。
+
+## 2026-08-13 — 修复 DEVONthink 多文件导出失败
+
+### 背景
+
+用户在 DEVONthink 3 中选中两个文件触发技能时报「导出文件失败: Command failed: osascript -e 'tell application id "com.devontechnologies.think3" ...'」。单文件场景正常。
+
+### 根因（三层叠加，均经实测定位）
+
+1. **多记录分隔符（主因，解释「两个文件才失败」）**
+   `getSelectedDevonThinkRecords` 用 AppleScript `resultList as string` 拼接多条记录，JS 端用 `.split(", ")` 拆分。但 AppleScript 默认 `text item delimiters` 是**空串**（不是 `", "`），多记录会直接粘连。`.split(", ")` 仅得 1 条字段错位的记录：第一条 `hasPath` 变成 `true<pathB>...` ≠ `"true"`，`finalPath` 落到 `referenceUrl`（`x-devonthink-item://`），被误判为「需要 export」。单文件时 list 只有一个元素、无分隔问题，故长期未暴露。
+
+2. **export 脚本 `get record` 语法错误（-2741）**
+   原写 `get record at id "${uuid}"`：`at` 介词不合法，且把字符串当数字 id。正确写法 `get record with uuid "<uuid>"`，需取 `uuid of theRecord`（字符串）而非 `id of theRecord`（数字）。
+
+3. **export 命令参数错误**
+   原写 `export theRecord to file thePath`。查 sdef 得 export 签名：`record` 是**命名参数**、`to` 接 **POSIX 目录字符串**（非 file 对象），命令返回实际导出路径。漏写 `record` 标签即报「参数丢失」。
+
+### 决策与实现（`src/utils/devonthink.ts`）
+
+- `getSelected`：取 `uuid of theRecord`；返回前显式 `set AppleScript's text item delimiters to linefeed`，JS 端改 `.split("\n")`。POSIX 路径不含换行，分隔安全。
+- `exportDevonThinkRecordToTemp`：改 `get record with uuid`；`export record theRecord to "${tempDir}"`，用其返回值作导出路径。
+- 附带修复 shell 单引号转义 `\\'` → `'\''`（原转义在 shell 单引号串内无效，含 `'` 的 AppleScript 会破坏命令）；export 失败时透出 osascript 完整 stderr。
+
+### 验证
+
+`npm run typescript` 通过；ESLint / Prettier 通过（package.json author 404 为既有问题，与本次无关）。DEVONthink 实测：linefeed 分隔两端正确解析 2 条记录、export 返回准确路径并产出文件。
+
+### 重新评估条件
+
+DEVONthink 升级若改动 AppleScript 字典（export 签名 / record 获取语法），需重新核对 `sdef`。
+
 ## 2026-07-28 — 搜索栏支持 URL 输入（解绑必选文件）
 
 ### 背景
