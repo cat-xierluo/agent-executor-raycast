@@ -81,7 +81,8 @@ export async function getSelectedDevonThinkRecords(): Promise<
         repeat with theRecord in theSelection
           -- 获取基本属性
           set theName to name of theRecord
-          set theUUID to id of theRecord
+          -- 取 uuid 字符串（而非数字 id），供 export 时 get record with uuid 定位
+          set theUUID to uuid of theRecord
           set recordType to type of theRecord
 
           -- 尝试获取文件系统路径
@@ -122,7 +123,13 @@ export async function getSelectedDevonThinkRecords(): Promise<
           set end of resultList to resultString
         end repeat
 
-        return resultList as string
+        -- 显式设置记录分隔符为换行：默认 text item delimiters 为空串，
+        -- 多记录 as string 会粘连，导致 JS 端无法拆分（多文件 bug 根因）。
+        -- 路径/文件名不含换行，故 linefeed 是安全的记录分隔符。
+        set AppleScript's text item delimiters to linefeed
+        set theResult to resultList as string
+        set AppleScript's text item delimiters to ""
+        return theResult
       on error errMsg
         return "Error: " & errMsg
       end try
@@ -131,7 +138,7 @@ export async function getSelectedDevonThinkRecords(): Promise<
 
   try {
     const result = await execAsync(
-      `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
+      `osascript -e '${appleScript.replace(/'/g, "'\\''")}'`,
     );
 
     // 检查是否有错误
@@ -144,8 +151,9 @@ export async function getSelectedDevonThinkRecords(): Promise<
     }
 
     // 解析结果
+    // 按换行拆分多条记录（AppleScript 端已显式用 linefeed 连接）
     const records: DevonThinkRecord[] = result
-      .split(", ")
+      .split("\n")
       .map((item) => {
         const [path, name, uuid, type, referenceUrl, hasPath] =
           item.split("||");
@@ -207,7 +215,7 @@ export async function getFrontmostApplication(): Promise<string> {
     `;
 
     const result = await execAsync(
-      `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
+      `osascript -e '${appleScript.replace(/'/g, "'\\''")}'`,
     );
 
     return result;
@@ -315,16 +323,15 @@ export async function exportDevonThinkRecordToTemp(
   const appleScript = `
     tell application id "${bundleId}"
       try
-        set theRecord to get record at id "${record.uuid}"
+        set theRecord to get record with uuid "${record.uuid}"
         if theRecord is missing value then
           error "Record not found"
         end if
 
-        set theName to name of theRecord
-        set thePath to "${tempDir}/" & theName
-
-        -- 导出文件到临时目录
-        export theRecord to file thePath
+        -- 导出记录到临时目录：
+        -- export 的 record 是命名参数、to 接 POSIX 目录字符串（非 file 对象），
+        -- 命令返回实际导出路径（同名时自动加序号），直接用作结果。
+        set thePath to export record theRecord to "${tempDir}"
 
         return thePath
       on error errMsg
@@ -338,7 +345,7 @@ export async function exportDevonThinkRecordToTemp(
     await execAsync(`mkdir -p "${tempDir}"`);
 
     const result = await execAsync(
-      `osascript -e '${appleScript.replace(/'/g, "\\'")}'`,
+      `osascript -e '${appleScript.replace(/'/g, "'\\''")}'`,
     );
 
     if (result.startsWith("Error:")) {
@@ -347,8 +354,12 @@ export async function exportDevonThinkRecordToTemp(
 
     return result;
   } catch (error) {
+    // exec 的 error 带 stderr（osascript 真实报错），一并透出，避免只看到被截断的 "Command failed..."
     if (error instanceof Error) {
-      throw new Error(`导出文件失败: ${error.message}`);
+      const stderr =
+        (error as Error & { stderr?: string }).stderr?.trim() ?? "";
+      const detail = stderr ? `${error.message}\n${stderr}` : error.message;
+      throw new Error(`导出文件失败: ${detail}`);
     }
     throw error;
   }
