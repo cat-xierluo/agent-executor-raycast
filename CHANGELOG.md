@@ -6,6 +6,13 @@
 
 ### 新增 (Added)
 
+- **CodeBuddy 后端适配（无头模式）**：执行后端不再局限于 Claude Code，可在 Raycast 偏好中切换默认后端，也可在插件 UI 中临时切换为 CodeBuddy CLI。
+  - 新增 Raycast 偏好「执行后端」（`backend`，dropdown，默认 `claude`）与「CodeBuddy CLI 可执行文件路径」（`codebuddyBin`，textfield，默认 `~/.local/bin/codebuddy`）。
+  - **UI 内执行后端切换**：`commands.tsx` 新增 `selectedBackend` 状态（默认取全局偏好），列表级、自由指令、每个技能的 ActionPanel 均提供「执行后端：Claude Code / CodeBuddy」切换按钮（快捷键 `Cmd+Shift+B`），执行时以当前选中后端为准，无需进设置页。
+  - `src/utils/claude.ts` 新增 `AgentBackend` 类型、`resolveBackendBin()` 与 `codebuddyBin`/`backend` 配置项；`executeClaudeCommand` / `executeClaudeStreaming` 按后端路由到对应二进制（两者 CLI 标志与 `--output-format json`/`stream-json` 输出结构兼容）。
+  - 适配 CodeBuddy 的 `--output-format json` 返回**数组**（末尾为 `result` 对象）的差异：解析时统一从对象/数组中提取 `session_id`、`is_error`、`result`；流式模式改为直接从 `result` 行读取 `is_error`，替换原先对 fullOutput 的正则匹配。
+  - `taskQueue.ts` 的 `QueuedTask` 与 `commands.tsx` 的直接执行/排队两条路径均透传 `backend`/`codebuddyBin`。
+  - Skill 调用沿用 `/<skill.name>` 前缀，CodeBuddy 同样支持 `/skill-name` 手动触发项目级 `.codebuddy/skills/` 下的技能。
 - **无头模式系统级前置指令注入**：后台（无头）启动 Agent 时通过 Claude CLI 的 `--append-system-prompt` 注入一段系统级前置指令，解决此前 Agent 频繁回头向用户提问/要求确认（如 OCR 敏感材料外传授权）的问题。
   - 新增 Raycast 偏好「无头模式前置指令」（`headlessPreamble`，textarea，可选）：用户可在设置中整体覆盖；留空使用内置默认。
   - `src/utils/claude.ts` 新增 `DEFAULT_HEADLESS_PREAMBLE` 常量与 `resolveHeadlessPreamble()`，在流式（`-p`）与无头 print（`--print`）两个 spawn 点条件追加 `--append-system-prompt`；非无头的终端窗口路径不注入（用户在场可正常交互）。因在 `claude.ts` 内部读取偏好，直接执行与排队执行两条路径自动覆盖。
@@ -23,6 +30,13 @@
 
 ### 修复 (Fixed)
 
+- **无头执行结果/会话捕获丢失（stdout 为空 + 进程变僵尸导致任务卡死，Claude 与 CodeBuddy 均存在）**：非流式路径原本用 `--output-format json`，该格式会把最终结果**缓冲到最后一次性写入 stdout**，进程异常退出/未回收时 stdout 为空，导致结果文本和 `session_id` 全部丢失，`executeClaudeCommand` 的 promise 永久挂起，任务在 UI 里一直显示「执行中」、日志停在 `executing`，事后靠状态页 `pid_detection` 兜底恢复成 `failed`（8/12、8/13 的 `/pdf-processor` 任务即此现象）。修复：
+  - `src/utils/claude.ts` 的 `executeClaudeCommand`：**Claude 与 CodeBuddy 统一改用 `--output-format stream-json --verbose`** 逐行输出（实测两者均稳定吐最终 `result` 行，含 `result`/`is_error`/`session_id`；Claude 的 stream-json 要求带 `--verbose`）。
+  - 新增 `parsePrintOutput()` 统一解析三种格式（Claude 单对象 / CodeBuddy json 数组 / stream-json 行），取最后一个 `result` 行。
+  - 新增 30 分钟超时兜底（`execTimeoutTimer`）：进程长时间不退出/close 不触发时强制 `SIGKILL` 并返回超时错误，避免任务永远停在「执行中」；正常完成时 `clearTimeout`。`executeClaudeCommand` 与 `executeClaudeStreaming` 两条路径均覆盖。
+- **技能列表出现重复 id 报错（`Found list item with duplicated ids`）**：当同一项目目录被重复配置（或从多个来源扫描到同一 skill 目录）时，`scanSkills` 会返回 `skillDir` 相同的多个条目，导致 Raycast `List` 的 `id` 冲突直接抛 API Exception。修复：
+  - `src/utils/claude.ts` 的 `loadConfig()` 对展开 `~` 后的项目目录做 `Set` 去重，避免同一目录被配置多次时重复扫描。
+  - `src/utils/skills.ts` 的 `scanSkills()` 在收集完所有 skill 后按 `skillDir` 去重，作为兜底防止任何来源的重复条目。
 - **DEVONthink 多文件选择导出失败**：在 DEVONthink 中选中 ≥2 个文件触发技能时报「导出文件失败: Command failed: osascript ...」。根因为三处缺陷叠加：
   - **多记录分隔符（主因）**：`getSelectedDevonThinkRecords` 用 `resultList as string` 返回多条记录，假设分隔符为 `", "`，但 AppleScript 默认 `text item delimiters` 为空串，多记录会**粘连**。JS 端 `.split(", ")` 只得到 1 条字段错位的记录，使本有文件系统路径的记录被误判为 `x-devonthink-item://` URL，误触发 export 分支（单文件不受影响，故长期未暴露）。
   - **export AppleScript 语法**：`get record at id "..."` 编译报 `-2741`；正确写法为 `get record with uuid "..."`，且取 `uuid of theRecord`（字符串）而非数字 `id`。

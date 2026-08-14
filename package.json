@@ -79,12 +79,38 @@
       "description": "第五个项目目录（可选）"
     },
     {
+      "name": "backend",
+      "type": "dropdown",
+      "required": false,
+      "title": "执行后端",
+      "description": "选择用于执行技能的 Agent CLI（Claude Code 或 CodeBuddy）",
+      "default": "claude",
+      "data": [
+        {
+          "title": "Claude Code",
+          "value": "claude"
+        },
+        {
+          "title": "CodeBuddy",
+          "value": "codebuddy"
+        }
+      ]
+    },
+    {
       "name": "claudeBin",
       "type": "textfield",
       "required": false,
       "title": "Claude CLI 可执行文件路径",
       "description": "可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude）",
       "default": "~/.local/bin/claude"
+    },
+    {
+      "name": "codebuddyBin",
+      "type": "textfield",
+      "required": false,
+      "title": "CodeBuddy CLI 可执行文件路径",
+      "description": "可选：指定 codebuddy 命令的完整路径（默认：~/.local/bin/codebuddy）",
+      "default": "~/.local/bin/codebuddy"
     },
     {
       "name": "headlessMode",

@@ -20,6 +20,7 @@ import {
   executeClaudeCommand,
   executeClaudeStreaming,
   getConfig,
+  type AgentBackend,
 } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
 import { scanSkills, ClaudeSkill } from "./utils/skills";
@@ -102,6 +103,27 @@ export default function CommandList(
   const [streamingOutput, setStreamingOutput] = useState<string>("");
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [streamingCommand, setStreamingCommand] = useState<string | null>(null);
+
+  // 执行后端选择（默认取全局偏好，可在 UI 中临时切换）
+  const [selectedBackend, setSelectedBackend] = useState<AgentBackend>(() => {
+    try {
+      return getConfig().backend;
+    } catch {
+      return "claude";
+    }
+  });
+
+  // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy 间切换）
+  const backendToggleAction = (
+    <Action
+      title={`执行后端：${selectedBackend === "codebuddy" ? "CodeBuddy" : "Claude Code"}`}
+      onAction={() =>
+        setSelectedBackend((b) => (b === "codebuddy" ? "claude" : "codebuddy"))
+      }
+      icon={Icon.Switch}
+      shortcut={{ modifiers: ["cmd", "shift"], key: "b" }}
+    />
+  );
 
   // 使用 ref 持有最新的轮询函数，避免闭包陈旧问题
   const loadSelectedFilesRef = useRef<() => void>(loadSelectedFiles);
@@ -188,6 +210,8 @@ export default function CommandList(
           workDir: task.projectDir,
           projectDir: task.projectDir,
           claudeBin: task.claudeBin,
+          codebuddyBin: task.codebuddyBin,
+          backend: task.backend,
           headlessMode: task.headlessMode,
         },
         logger,
@@ -356,8 +380,9 @@ export default function CommandList(
 
   /**
    * 执行自由指令（直接输入prompt，不走skill）
+   * @param backendOverride 可选：覆盖当前选中的执行后端
    */
-  async function executeFreeCommand() {
+  async function executeFreeCommand(backendOverride?: AgentBackend) {
     if (processingCommand.some((c) => c.name === "free-command")) return;
 
     // 解析搜索栏：分离 URL 与剩余备注
@@ -434,6 +459,7 @@ export default function CommandList(
 
     const executionStartTime = Date.now();
     const config = getConfig();
+    const runtimeBackend = backendOverride ?? selectedBackend;
 
     try {
       const projectDir = config.projectDirs[0];
@@ -462,6 +488,8 @@ export default function CommandList(
           prompt,
           projectDir: config.projectDirs[0],
           claudeBin: config.claudeBin,
+          codebuddyBin: config.codebuddyBin,
+          backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
           targetFilePath: actualFilePath || undefined,
@@ -493,6 +521,8 @@ export default function CommandList(
           workDir: projectDir,
           projectDir,
           claudeBin: config.claudeBin,
+          codebuddyBin: config.codebuddyBin,
+          backend: runtimeBackend,
           headlessMode: config.headlessMode,
           onPid: (pid) => {
             activePids.current["free-command"] = pid;
@@ -520,6 +550,8 @@ export default function CommandList(
             workDir: projectDir,
             projectDir,
             claudeBin: config.claudeBin,
+            codebuddyBin: config.codebuddyBin,
+            backend: runtimeBackend,
             headlessMode: config.headlessMode,
             onPid: (pid) => {
               activePids.current["free-command"] = pid;
@@ -606,8 +638,9 @@ export default function CommandList(
 
   /**
    * 执行技能（包含兼容层的特殊处理）
+   * @param backendOverride 可选：覆盖当前选中的执行后端
    */
-  async function executeSkill(skill: ClaudeSkill) {
+  async function executeSkill(skill: ClaudeSkill, backendOverride?: AgentBackend) {
     if (processingCommand.some((c) => c.name === skill.name)) return;
 
     // 解析搜索栏：分离 URL 与剩余备注
@@ -698,6 +731,7 @@ export default function CommandList(
 
     const executionStartTime = Date.now();
     const config = getConfig();
+    const runtimeBackend = backendOverride ?? selectedBackend;
 
     try {
       const projectDir = skill.projectDir || config.projectDirs[0];
@@ -733,6 +767,8 @@ export default function CommandList(
           prompt,
           projectDir: skill.projectDir || config.projectDirs[0],
           claudeBin: config.claudeBin,
+          codebuddyBin: config.codebuddyBin,
+          backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
           targetFilePath: actualFilePath || undefined,
@@ -764,6 +800,8 @@ export default function CommandList(
           workDir: projectDir,
           projectDir,
           claudeBin: config.claudeBin,
+          codebuddyBin: config.codebuddyBin,
+          backend: runtimeBackend,
           headlessMode: config.headlessMode,
           onPid: (pid) => {
             activePids.current[skill.name] = pid;
@@ -791,6 +829,8 @@ export default function CommandList(
             workDir: projectDir,
             projectDir,
             claudeBin: config.claudeBin,
+            codebuddyBin: config.codebuddyBin,
+            backend: runtimeBackend,
             headlessMode: config.headlessMode,
             onPid: (pid) => {
               activePids.current[skill.name] = pid;
@@ -916,6 +956,7 @@ export default function CommandList(
       onSearchTextChange={setNote}
       actions={
         <ActionPanel>
+          {backendToggleAction}
           <Action
             title="刷新列表"
             onAction={loadSkills}
@@ -1145,6 +1186,7 @@ export default function CommandList(
                         icon={Icon.Play}
                       />
                     )}
+                    {backendToggleAction}
                   </ActionPanel>
                 }
               />
@@ -1253,6 +1295,7 @@ export default function CommandList(
                         shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
                       />
                     )}
+                    {backendToggleAction}
                     <Action
                       title="切换置顶状态"
                       onAction={() => {

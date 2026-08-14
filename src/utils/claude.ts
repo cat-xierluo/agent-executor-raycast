@@ -11,10 +11,15 @@ import {
 } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 
+/** 执行后端：Claude Code 或 CodeBuddy（两者 CLI 兼容，输出格式基本一致） */
+export type AgentBackend = "claude" | "codebuddy";
+
 export interface AgentExecutorConfig {
   projectDirs: string[]; // 扫描 .claude/commands/ 目录
   skillsDirs: string[]; // 扫描 ~/.claude/skills/ 目录
   claudeBin: string;
+  codebuddyBin: string;
+  backend: AgentBackend;
   headlessMode: boolean;
   streamingMode: boolean;
 }
@@ -25,7 +30,9 @@ export interface Preferences {
   projectDir3?: string;
   projectDir4?: string;
   projectDir5?: string;
+  backend?: AgentBackend;
   claudeBin?: string;
+  codebuddyBin?: string;
   headlessMode?: boolean;
   enableDefaultSkills?: boolean; // 新增：是否启用默认 ~/.claude/skills/
   streamingMode?: boolean; // 新增：是否启用流式输出
@@ -95,7 +102,9 @@ export function loadConfig(): AgentExecutorConfig {
     prefs.projectDir5,
   ].filter(Boolean);
 
-  const projectDirs = rawDirs.map((dir) => dir.replace(/^~/, homedir()));
+  const projectDirs = [
+    ...new Set(rawDirs.map((dir) => dir.replace(/^~/, homedir()))),
+  ];
 
   // 验证至少有一个有效目录
   const validDirs = projectDirs.filter(isValidProjectDir);
@@ -119,6 +128,14 @@ export function loadConfig(): AgentExecutorConfig {
     homedir(),
   );
 
+  const codebuddyBin = (prefs.codebuddyBin || "~/.local/bin/codebuddy").replace(
+    /^~/,
+    homedir(),
+  );
+
+  // 执行后端默认 claude（向后兼容）
+  const backend: AgentBackend = prefs.backend === "codebuddy" ? "codebuddy" : "claude";
+
   // headlessMode 默认为 true（向后兼容）
   const headlessMode = prefs.headlessMode !== false;
 
@@ -140,6 +157,8 @@ export function loadConfig(): AgentExecutorConfig {
     projectDirs: validDirs,
     skillsDirs,
     claudeBin,
+    codebuddyBin,
+    backend,
     headlessMode,
     streamingMode,
   };
@@ -155,11 +174,88 @@ export function getConfig(): AgentExecutorConfig {
   return loadConfig();
 }
 
+/**
+ * 根据后端解析对应的 CLI 可执行文件路径。
+ * codebuddy 后端用 codebuddyBin，否则用 claudeBin（缺省回退到默认路径）。
+ */
+export function resolveBackendBin(
+  backend: AgentBackend | undefined,
+  claudeBin?: string,
+  codebuddyBin?: string,
+): string {
+  if (backend === "codebuddy") {
+    return codebuddyBin || join(homedir(), ".local/bin/codebuddy");
+  }
+  return claudeBin || join(homedir(), ".local/bin/claude");
+}
+
+/**
+ * 解析 `--output-format json` / `stream-json` 的 stdout，统一提取最终结果。
+ * - Claude Code（json）：单个 result 对象
+ * - CodeBuddy（json）：数组，最后一个为 result 对象
+ * - CodeBuddy（stream-json）：逐行 JSON，最后一行是 result 对象
+ * 任何格式解析失败都返回空对象，由调用方回退到原始输出。
+ */
+export function parsePrintOutput(stdout: string): {
+  result?: unknown;
+  sessionId?: string;
+  isError?: boolean;
+} {
+  // 1) stream-json 逐行（Claude 与 CodeBuddy 可靠输出路径），取最后一个 result 行
+  let lastStreamResult: { result?: unknown; sessionId?: string; isError?: boolean } | null = null;
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (parsed && parsed.type === "result") {
+        lastStreamResult = {
+          result: parsed.result,
+          sessionId: parsed.session_id,
+          isError: parsed.is_error,
+        };
+      }
+    } catch {
+      // 忽略非 JSON 行（如日志文本）
+    }
+  }
+  if (lastStreamResult) return lastStreamResult;
+
+  // 2) 单个对象 / 数组（Claude 单对象、CodeBuddy json 数组）
+  try {
+    const parsed = JSON.parse(stdout);
+    if (Array.isArray(parsed)) {
+      for (let i = parsed.length - 1; i >= 0; i--) {
+        const item = parsed[i];
+        if (item && typeof item === "object" && item.type === "result") {
+          return {
+            result: item.result,
+            sessionId: item.session_id,
+            isError: item.is_error,
+          };
+        }
+      }
+    } else if (parsed && typeof parsed === "object") {
+      return {
+        result: parsed.result,
+        sessionId: parsed.session_id,
+        isError: parsed.is_error,
+      };
+    }
+  } catch {
+    // 解析失败
+  }
+
+  return {};
+}
+
 export interface ClaudeExecutionOptions {
   prompt: string;
   workDir: string;
   projectDir: string;
   claudeBin?: string;
+  codebuddyBin?: string;
+  backend?: AgentBackend;
   headlessMode?: boolean;
   onPid?: (pid: number) => void;
 }
@@ -188,6 +284,8 @@ export interface ClaudeStreamingOptions {
   workDir: string;
   projectDir: string;
   claudeBin?: string;
+  codebuddyBin?: string;
+  backend?: AgentBackend;
   headlessMode?: boolean;
   onPid?: (pid: number) => void;
   onChunk?: StreamingCallback; // 流式输出回调
@@ -288,13 +386,19 @@ export async function executeClaudeStreaming(
   const {
     projectDir,
     claudeBin: customClaudeBin,
+    codebuddyBin: customCodebuddyBin,
+    backend,
     prompt,
     headlessMode = true,
     onPid,
     onChunk,
     logger,
   } = options;
-  const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
+  const claudeBin = resolveBackendBin(
+    backend,
+    customClaudeBin,
+    customCodebuddyBin,
+  );
   const startTime = Date.now();
 
   // 读取项目的 settings.json 环境变量
@@ -317,6 +421,7 @@ export async function executeClaudeStreaming(
   return new Promise((resolve) => {
     let fullOutput = "";
     let sessionId: string | undefined;
+    let streamApiSuccess: boolean | undefined;
     let lineBuffer = ""; // 行缓冲，防止 JSON 在 TCP 分包时被截断
 
     // 使用参数数组传递 prompt，避免 shell 转义和注入问题
@@ -348,6 +453,28 @@ export async function executeClaudeStreaming(
     // 记录执行信息（含 PID）
     logger?.logExecuting?.(prompt, pid);
 
+    // 超时兜底：进程长时间不退出（如残留僵尸/close 不触发）时强制结束并返回错误，
+    // 避免任务永远停在"执行中"。正常完成会 clearTimeout。
+    const EXEC_TIMEOUT_MS = 30 * 60 * 1000; // 30 分钟
+    const execTimeoutTimer = setTimeout(() => {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // 进程可能已退出，忽略
+      }
+      const duration = Date.now() - startTime;
+      resolve({
+        success: false,
+        output: `执行超时（超过 ${EXEC_TIMEOUT_MS / 60000} 分钟，已强制终止）`,
+        error: `执行超时（超过 ${EXEC_TIMEOUT_MS / 60000} 分钟，已强制终止）`,
+        exitCode: 124,
+        duration,
+        pid,
+        sessionId,
+      });
+    }, EXEC_TIMEOUT_MS);
+    execTimeoutTimer.unref?.();
+
     // 处理完整的 JSON 行
     function processLine(line: string) {
       if (!line.trim()) return;
@@ -377,6 +504,10 @@ export async function executeClaudeStreaming(
           parsed.subtype === "success" ||
           parsed.subtype === "error"
         ) {
+          // 直接从 result 行读取 is_error（Claude Code 与 CodeBuddy 均输出该字段）
+          if (parsed.type === "result" && parsed.is_error !== undefined) {
+            streamApiSuccess = parsed.is_error === false;
+          }
           // 将完整结果 JSON 追加到 fullOutput（用于后续解析 is_error）
           fullOutput += line + "\n";
           // 如果有 result 字段的内容，也追加到实时输出
@@ -435,21 +566,24 @@ export async function executeClaudeStreaming(
     child.on("close", (code, signal) => {
       const duration = Date.now() - startTime;
       const exitCode = code ?? (signal ? 1 : 0);
+      clearTimeout(execTimeoutTimer);
 
-      // 尝试从 fullOutput 中解析 is_error 字段
-      let apiSuccess: boolean | undefined;
-      try {
-        const jsonMatch = fullOutput.match(
-          /\{[\s\S]*"is_error"\s*:\s*(true|false)[\s\S]*\}/,
-        );
-        if (jsonMatch) {
-          const parsed = JSON.parse(jsonMatch[0]);
-          if (parsed.is_error !== undefined) {
-            apiSuccess = parsed.is_error === false;
+      // 优先使用流式解析出的 is_error，回退到从 fullOutput 正则解析
+      let apiSuccess = streamApiSuccess;
+      if (apiSuccess === undefined) {
+        try {
+          const jsonMatch = fullOutput.match(
+            /\{[\s\S]*"is_error"\s*:\s*(true|false)[\s\S]*\}/,
+          );
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.is_error !== undefined) {
+              apiSuccess = parsed.is_error === false;
+            }
           }
+        } catch {
+          // 解析失败，忽略
         }
-      } catch {
-        // 解析失败，忽略
       }
 
       // 优先使用 apiSuccess 判断成功与否
@@ -469,6 +603,7 @@ export async function executeClaudeStreaming(
 
     child.on("error", (error) => {
       const duration = Date.now() - startTime;
+      clearTimeout(execTimeoutTimer);
 
       resolve({
         success: false,
@@ -494,11 +629,17 @@ export async function executeClaudeCommand(
   const {
     projectDir,
     claudeBin: customClaudeBin,
+    codebuddyBin: customCodebuddyBin,
+    backend,
     prompt,
     headlessMode = true,
     onPid,
   } = options;
-  const claudeBin = customClaudeBin || join(homedir(), ".local/bin/claude");
+  const claudeBin = resolveBackendBin(
+    backend,
+    customClaudeBin,
+    customCodebuddyBin,
+  );
 
   const startTime = Date.now();
 
@@ -618,11 +759,14 @@ end tell`;
     try {
       // 使用参数数组传递 prompt，避免 shell 转义和注入问题
       // 无头模式注入系统级前置指令（压制提问/预设外传授权），见 resolveHeadlessPreamble()
+      // 统一使用 stream-json 逐行输出：--output-format json 会把结果缓冲到最后一次性写 stdout，
+      // 进程异常退出时 stdout 为空导致结果/ session 全部丢失（Claude 与 CodeBuddy 都出现过）。
       const printArgs = [
         "--print",
         "--dangerously-skip-permissions",
         "--output-format",
-        "json",
+        "stream-json",
+        "--verbose",
         prompt,
       ];
       const printPreamble = resolveHeadlessPreamble();
@@ -635,6 +779,27 @@ end tell`;
         detached: false,
         stdio: ["ignore", "pipe", "pipe"],
       });
+
+      // 超时兜底：进程长时间不退出（如残留僵尸/close 不触发）时强制结束并返回错误，
+      // 避免任务永远停在"执行中"。正常完成会 clearTimeout。
+      const EXEC_TIMEOUT_MS = 30 * 60 * 1000; // 30 分钟
+      const execTimeoutTimer = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          // 进程可能已退出，忽略
+        }
+        const duration = Date.now() - startTime;
+        resolve({
+          success: false,
+          output: `执行超时（超过 ${EXEC_TIMEOUT_MS / 60000} 分钟，已强制终止）`,
+          error: `执行超时（超过 ${EXEC_TIMEOUT_MS / 60000} 分钟，已强制终止）`,
+          exitCode: 124,
+          duration,
+          pid,
+        });
+      }, EXEC_TIMEOUT_MS);
+      execTimeoutTimer.unref?.();
 
       pid = child.pid;
       if (pid) {
@@ -675,31 +840,20 @@ end tell`;
             const rawOutput =
               stdout + stderr || readFileSync(tempOutputFile, "utf-8");
 
-            // 尝试解析 stdout 中的 JSON 输出，避免 stderr 警告破坏解析
-            try {
-              const jsonOutput = JSON.parse(stdout);
-
-              // 提取 session_id
-              if (jsonOutput.session_id) {
-                sessionId = jsonOutput.session_id;
-              }
-
-              // 提取 is_error 字段用于判断 API 执行成功与否
-              // 即使进程退出码非 0，只要 is_error === false 仍认为执行成功
-              if (jsonOutput.is_error !== undefined) {
-                apiSuccess = jsonOutput.is_error === false;
-              }
-
-              // 提取实际结果文本
-              if (jsonOutput.result) {
-                output = jsonOutput.result;
-              } else {
-                // 如果没有 result 字段,使用原始输出
-                output = rawOutput;
-              }
-            } catch {
-              // JSON 解析失败,使用原始输出(可能是错误信息)
+            // 统一解析 stdout（Claude 单对象 / CodeBuddy 数组或 stream-json 行）
+            const parsedOut = parsePrintOutput(stdout);
+            if (
+              typeof parsedOut.result === "string" &&
+              parsedOut.result
+            ) {
+              output = parsedOut.result;
+            } else {
+              // 没有可用 result 字段，使用原始输出（可能是错误信息）
               output = rawOutput;
+            }
+            if (parsedOut.sessionId) sessionId = parsedOut.sessionId;
+            if (parsedOut.isError !== undefined) {
+              apiSuccess = parsedOut.isError === false;
             }
           }
 
@@ -708,6 +862,8 @@ end tell`;
         } catch {
           // 清理失败不影响结果
         }
+
+        clearTimeout(execTimeoutTimer);
 
         // 优先使用 apiSuccess 判断成功与否（如果可用），否则使用 exitCode
         const isSuccess =
@@ -727,6 +883,7 @@ end tell`;
 
       child.on("error", (error) => {
         const duration = Date.now() - startTime;
+        clearTimeout(execTimeoutTimer);
 
         // 清理临时文件
         try {

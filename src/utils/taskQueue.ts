@@ -3,6 +3,7 @@ import { join } from "path";
 import { LOG_DIR } from "./logger";
 import { countRunningCommands } from "./status";
 import { getPreferenceValues } from "@raycast/api";
+import { AgentBackend } from "./claude";
 
 const QUEUE_FILE = join(LOG_DIR, "task-queue.json");
 
@@ -12,6 +13,8 @@ export interface QueuedTask {
   prompt: string;
   projectDir: string;
   claudeBin: string;
+  codebuddyBin?: string;
+  backend?: AgentBackend;
   headlessMode: boolean;
   streamingMode: boolean;
   targetFilePath?: string;

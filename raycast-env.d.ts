@@ -18,14 +18,20 @@ type ExtensionPreferences = {
   "projectDir4"?: string,
   /** 项目目录 5 - 第五个项目目录（可选） */
   "projectDir5"?: string,
+  /** 执行后端 - 选择用于执行技能的 Agent CLI（Claude Code 或 CodeBuddy） */
+  "backend": "claude" | "codebuddy",
   /** Claude CLI 可执行文件路径 - 可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude） */
   "claudeBin": string,
+  /** CodeBuddy CLI 可执行文件路径 - 可选：指定 codebuddy 命令的完整路径（默认：~/.local/bin/codebuddy） */
+  "codebuddyBin": string,
   /** 后台运行模式 - 启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。 */
   "headlessMode": boolean,
   /** 启用默认 Skills 目录 - 自动扫描 ~/.claude/skills/ 目录中的 Skills */
   "enableDefaultSkills": boolean,
   /** 流式输出模式 - 实时显示 Claude 的输出（类似 SkillLauncher） */
   "streamingMode": boolean,
+  /** 无头模式前置指令 - 可选：后台（无头）模式下注入给 Agent 的系统级前置指令，用于压制不必要的提问与确认。留空则使用内置默认（默认授权所有需外传的已配置后端、不向用户提问、输出按 YYMMDD 前缀写入输入文件目录）。仅在后台运行模式启用时生效。 */
+  "headlessPreamble"?: unknown,
   /** 最大并发数 - 同时运行的最大 Agent 数量，超出部分排队等待 */
   "concurrencyLimit": "1" | "3" | "5" | "10" | "15"
 }

@@ -192,8 +192,16 @@ export function scanSkills(
     }
   }
 
+  // 去重：同一 skillDir 可能因目录重复配置被扫描多次，导致 ListItem id 重复（Raycast 会报错）
+  const seenSkillDirs = new Set<string>();
+  const uniqueSkills = allSkills.filter((skill) => {
+    if (seenSkillDirs.has(skill.skillDir)) return false;
+    seenSkillDirs.add(skill.skillDir);
+    return true;
+  });
+
   // 应用元数据（复用现有逻辑）
-  const skillsWithMetadata = applyMetadataToSkills(allSkills);
+  const skillsWithMetadata = applyMetadataToSkills(uniqueSkills);
 
   // 读取统计数据（带缓存）
   const stats = readStats();
