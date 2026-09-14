@@ -12,6 +12,11 @@
   - **技能内容直嵌 query（绕开目录错配）**：Hermes 与 Claude Code 的技能目录布局不同（Hermes 为 `.hermes/skills/<分类>/<技能>/`，深一层；且 `-s` 只认 Hermes 自身索引，Raycast 扫到的技能传入会 `Unknown skill` 实测报错）。因此 Hermes 后端不传 `/skill-name` slash 前缀，改为把 SKILL.md 全文读出嵌入 query（`skillContent` 字段），语义对齐 Claude Code 的 Skill 工具注入。
   - **技能扫描按后端分流**：`scanSkills()` 新增 `backend` 参数——Hermes 后端扫项目 `.hermes/skills` + `.agents/skills` 及用户级 `~/.hermes/skills/<分类>/`（逐分类展开）；Claude 后端维持 `.claude/skills` 不变。`isValidProjectDir()` 同时接受三种布局。
   - `taskQueue.ts` 的 `QueuedTask` 增加 `skillFile`/`hermesBin`，排队回放时按需读取 SKILL.md 嵌入；`raycast-env.d.ts` 同步偏好类型。
+- **Hermes profile 切换（隔离岛操作）**：新增 Raycast 偏好「Hermes profile」（`hermesProfile`，textfield，默认空 = 主 profile）。填了名（如 `info-assistant`）则一切换到 `~/.hermes/profiles/<name>/` 下的 skills/、state/、sessions/，互不污染；profile 路径必须存在才生效（不存在时静默回退主 profile）。
+  - `getProjectEnv(projectDir, hermesHome?)`：若传入 `hermesHome`，通过 spawn 的 `env` 字段注入到 Hermes 子进程的 `HERMES_HOME`（**不污染父进程 shell 环境变量**——hermes_cli/AGENTS.md 明文规定 "never hardcode `~/.hermes`"，profile 隔离岛 by design）。
+  - `scanSkills(projectDirs, skillsDirs, backend, hermesProfileHome?)`：profile 模式下扫 `~/.hermes/profiles/<name>/skills/<分类>/<技能>/`（隔离岛），不再扫主 `~/.hermes/skills/`。路径不存在或解析失败回退到主 skills。
+  - `executeClaudeCommand` / `executeClaudeStreaming` / 队列执行器 / enqueue（两条路径共 7 个调用点）全部透传 `hermesProfileHome`。
+  - **端到端实测**：`HERMES_HOME=~/.hermes/profiles/info-assistant hermes chat -q ...` spawn 出来的子进程正常加载 profile 的 `zai/glm-5.3` + `GLM_API_KEY`，返回完整 session_id + 正文（exit 0），证明 profile 路径切换、env 注入、skill 索引三处都对。
 
 ### 改进 (Improved)
 

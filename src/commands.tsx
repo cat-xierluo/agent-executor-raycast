@@ -229,6 +229,7 @@ export default function CommandList(
           claudeBin: task.claudeBin,
           codebuddyBin: task.codebuddyBin,
           hermesBin: task.hermesBin,
+          hermesProfileHome: task.hermesProfileHome,
           backend: task.backend,
           skillContent,
           headlessMode: task.headlessMode,
@@ -266,11 +267,13 @@ export default function CommandList(
   async function loadSkills() {
     try {
       const config = getConfig();
-      // 传当前后端：Hermes 时按 .hermes/.agents + ~/.hermes/skills/<分类> 布局扫描
+      // 传当前后端：Hermes 时按 .hermes/.agents + Hermes skills 布局扫描
+      // hermesProfileHome 给定时扫 profile 的 skills/（隔离岛），空时扫主 ~/.hermes/skills/
       const availableSkills = scanSkills(
         config.projectDirs,
         config.skillsDirs,
         selectedBackend,
+        config.hermesProfileHome,
       );
       setItems(availableSkills);
     } catch (error) {
@@ -514,6 +517,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          hermesProfileHome: config.hermesProfileHome,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -548,6 +552,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          hermesProfileHome: config.hermesProfileHome,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           onPid: (pid) => {
@@ -578,6 +583,7 @@ export default function CommandList(
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
+            hermesProfileHome: config.hermesProfileHome,
             backend: runtimeBackend,
             headlessMode: config.headlessMode,
             onPid: (pid) => {
@@ -797,6 +803,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          hermesProfileHome: config.hermesProfileHome,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -831,6 +838,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          hermesProfileHome: config.hermesProfileHome,
           backend: runtimeBackend,
           skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
           headlessMode: config.headlessMode,
@@ -862,6 +870,7 @@ export default function CommandList(
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
+            hermesProfileHome: config.hermesProfileHome,
             backend: runtimeBackend,
             skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
             headlessMode: config.headlessMode,

@@ -173,8 +173,14 @@ export function scanSkills(
   projectDirs: string[],
   standaloneSkillsDirs: string[] = [],
   backend?: string,
+  hermesProfileHome?: string,
 ): ClaudeSkill[] {
-  const cacheKey = JSON.stringify({ projectDirs, standaloneSkillsDirs, backend });
+  const cacheKey = JSON.stringify({
+    projectDirs,
+    standaloneSkillsDirs,
+    backend,
+    hermesProfileHome,
+  });
   if (
     skillsCache &&
     skillsCacheKey === cacheKey &&
@@ -200,20 +206,27 @@ export function scanSkills(
       );
       allSkills.push(...skills);
     }
-    // Hermes 后端：额外扫描 ~/.hermes/skills/<分类>/<技能>/（比 Claude 深一层分类目录）。
-    // Hermes 的 -s 预加载从这个索引解析技能名，不扫这里则 Hermes 后端永远 Unknown skill。
+    // Hermes 后端：扫描用户级 skills。
+    // - profile 模式（hermesProfileHome 给了值）：扫 ~/.hermes/profiles/<name>/skills/<分类>/（隔离岛）
+    // - 主 Hermes 模式（hermesProfileHome 空）：扫 ~/.hermes/skills/<分类>/<技能>/（深一层分类目录）
+    // Hermes 的 chat -s 预加载从这个索引解析技能名；不扫这里则 Hermes 后端永远 Unknown skill。
     if (backend === "hermes") {
-      const hermesUserSkills = join(homedir(), ".hermes/skills");
-      if (isValidSkillsDir(hermesUserSkills)) {
+      const hermesSkillsRoot = hermesProfileHome
+        ? join(hermesProfileHome, "skills")
+        : join(homedir(), ".hermes/skills");
+      const rootLabel = hermesProfileHome
+        ? `Hermes · ${basename(hermesProfileHome)}`
+        : "Hermes";
+      if (existsSync(hermesSkillsRoot) && isValidSkillsDir(hermesSkillsRoot)) {
         // 分类目录展开：每个分类子目录都是一个 skills 目录
-        for (const entry of readdirSync(hermesUserSkills, { withFileTypes: true })) {
+        for (const entry of readdirSync(hermesSkillsRoot, { withFileTypes: true })) {
           if (entry.isDirectory() || entry.isSymbolicLink()) {
-            const catDir = join(hermesUserSkills, entry.name);
+            const catDir = join(hermesSkillsRoot, entry.name);
             if (isValidSkillsDir(catDir)) {
               const skills = scanSkillsDirectory(
                 catDir,
                 defaultExecutionProjectDir,
-                `Hermes · ${entry.name}`,
+                `${rootLabel} · ${entry.name}`,
               );
               allSkills.push(...skills);
             }
