@@ -26,6 +26,8 @@ type ExtensionPreferences = {
   "codebuddyBin": string,
   /** Hermes CLI 可执行文件路径 - 可选：指定 hermes 命令的完整路径（默认：~/.local/bin/hermes） */
   "hermesBin": string,
+  /** Hermes profile - 可选：指定 Hermes profile 名（如 info-assistant）。空 = 主 Hermes。profile 路径 = ~/.hermes/profiles/<name>，必须存在才生效。 */
+  "hermesProfile": string,
   /** 后台运行模式 - 启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。 */
   "headlessMode": boolean,
   /** 启用默认 Skills 目录 - 自动扫描 ~/.claude/skills/ 目录中的 Skills */

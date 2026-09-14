@@ -20,6 +20,8 @@ export interface AgentExecutorConfig {
   claudeBin: string;
   codebuddyBin: string;
   hermesBin: string;
+  hermesProfile: string; // Hermes profile 名称；空 = 主 Hermes
+  hermesProfileHome?: string; // 解析后的 HERMES_HOME 绝对路径；执行时注入到子进程 env
   backend: AgentBackend;
   headlessMode: boolean;
   streamingMode: boolean;
@@ -35,6 +37,7 @@ export interface Preferences {
   claudeBin?: string;
   codebuddyBin?: string;
   hermesBin?: string;
+  hermesProfile?: string; // Hermes profile 名；空 = 主 profile（~/.hermes）；填了则切到 ~/.hermes/profiles/<name>/
   headlessMode?: boolean;
   enableDefaultSkills?: boolean; // 新增：是否启用默认 ~/.claude/skills/
   streamingMode?: boolean; // 新增：是否启用流式输出
@@ -143,6 +146,17 @@ export function loadConfig(): AgentExecutorConfig {
     homedir(),
   );
 
+  // Hermes profile 解析：空 = 主 Hermes（HERMES_HOME 不注入，走默认 ~）；
+  // 填了名则解析为 ~/.hermes/profiles/<name>，路径必须存在才生效，否则保留主 profile。
+  const hermesProfile = (prefs.hermesProfile || "").trim();
+  let hermesProfileHome: string | undefined;
+  if (hermesProfile) {
+    const candidate = join(homedir(), ".hermes/profiles", hermesProfile);
+    if (existsSync(candidate)) {
+      hermesProfileHome = candidate;
+    }
+  }
+
   // 执行后端默认 claude（向后兼容）
   const backend: AgentBackend =
     prefs.backend === "codebuddy" || prefs.backend === "hermes"
@@ -172,6 +186,8 @@ export function loadConfig(): AgentExecutorConfig {
     claudeBin,
     codebuddyBin,
     hermesBin,
+    hermesProfile,
+    hermesProfileHome,
     backend,
     headlessMode,
     streamingMode,
@@ -331,6 +347,7 @@ export interface ClaudeExecutionOptions {
   claudeBin?: string;
   codebuddyBin?: string;
   hermesBin?: string;
+  hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
   backend?: AgentBackend;
   skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
   headlessMode?: boolean;
@@ -363,6 +380,7 @@ export interface ClaudeStreamingOptions {
   claudeBin?: string;
   codebuddyBin?: string;
   hermesBin?: string;
+  hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
   backend?: AgentBackend;
   skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
   headlessMode?: boolean;
@@ -389,9 +407,19 @@ export interface ClaudeStreamingOptions {
 /**
  * 从项目的 .claude/settings.json 读取 env 字段作为环境变量
  * 同时扫描 .claude/skills/ 下各 skill 的 assets/skill-env.json 合并环境配置
+ *
+ * 若传入 hermesHome，则作为 HERMES_HOME 注入到子进程 env，
+ * 使 Hermes 走 ~/.hermes/profiles/<name>/ 的 skills/ 与 state/（profile 隔离）。
  */
-function getProjectEnv(projectDir: string): Record<string, string> {
+function getProjectEnv(
+  projectDir: string,
+  hermesHome?: string,
+): Record<string, string> {
   const env: Record<string, string> = {};
+
+  if (hermesHome) {
+    env.HERMES_HOME = hermesHome;
+  }
 
   // 1. 读取项目级 settings.json
   try {
@@ -467,6 +495,7 @@ export async function executeClaudeStreaming(
     claudeBin: customClaudeBin,
     codebuddyBin: customCodebuddyBin,
     hermesBin: customHermesBin,
+    hermesProfileHome,
     backend,
     skillContent,
     prompt,
@@ -484,7 +513,10 @@ export async function executeClaudeStreaming(
   const startTime = Date.now();
 
   // 读取项目的 settings.json 环境变量
-  const projectEnv = getProjectEnv(projectDir);
+  const projectEnv = getProjectEnv(
+    projectDir,
+    backend === "hermes" ? hermesProfileHome : undefined,
+  );
 
   // 流式模式只能在 headless 模式下使用
   if (!headlessMode) {
@@ -737,6 +769,7 @@ export async function executeClaudeCommand(
     claudeBin: customClaudeBin,
     codebuddyBin: customCodebuddyBin,
     hermesBin: customHermesBin,
+    hermesProfileHome,
     backend,
     skillContent,
     prompt,
@@ -753,7 +786,10 @@ export async function executeClaudeCommand(
   const startTime = Date.now();
 
   // 读取项目的 settings.json 环境变量
-  const projectEnv = getProjectEnv(projectDir);
+  const projectEnv = getProjectEnv(
+    projectDir,
+    backend === "hermes" ? hermesProfileHome : undefined,
+  );
 
   // 如果不是无头模式，在新的 Terminal 窗口中运行 Claude Code
   if (!headlessMode) {

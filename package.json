@@ -125,6 +125,14 @@
       "default": "~/.local/bin/hermes"
     },
     {
+      "name": "hermesProfile",
+      "type": "textfield",
+      "required": false,
+      "title": "Hermes profile",
+      "description": "可选：指定 Hermes profile 名（如 info-assistant）。空 = 主 Hermes。profile 路径 = ~/.hermes/profiles/<name>，必须存在才生效。",
+      "default": ""
+    },
+    {
       "name": "headlessMode",
       "type": "checkbox",
       "required": false,

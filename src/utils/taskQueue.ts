@@ -16,6 +16,7 @@ export interface QueuedTask {
   claudeBin: string;
   codebuddyBin?: string;
   hermesBin?: string;
+  hermesProfileHome?: string; // 排队回放时 HERMES_HOME 注入（profile 隔离）
   backend?: AgentBackend;
   headlessMode: boolean;
   streamingMode: boolean;
