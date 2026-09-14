@@ -23,7 +23,8 @@ import {
   type AgentBackend,
 } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
-import { scanSkills, ClaudeSkill } from "./utils/skills";
+import { scanSkills, ClaudeSkill, readSkillContent } from "./utils/skills";
+import { readFileSync } from "fs";
 import { toggleSkillPinned, toggleSkillNew } from "./utils/commandMetadata";
 import { parseNoteInput } from "./utils/urlDetector";
 import {
@@ -113,12 +114,18 @@ export default function CommandList(
     }
   });
 
-  // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy 间切换）
+  // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy / Hermes 间轮换）
   const backendToggleAction = (
     <Action
-      title={`执行后端：${selectedBackend === "codebuddy" ? "CodeBuddy" : "Claude Code"}`}
+      title={`执行后端：${selectedBackend === "codebuddy" ? "CodeBuddy" : selectedBackend === "hermes" ? "Hermes" : "Claude Code"}`}
       onAction={() =>
-        setSelectedBackend((b) => (b === "codebuddy" ? "claude" : "codebuddy"))
+        setSelectedBackend((b) =>
+          b === "claude"
+            ? "codebuddy"
+            : b === "codebuddy"
+              ? "hermes"
+              : "claude",
+        )
       }
       icon={Icon.Switch}
       shortcut={{ modifiers: ["cmd", "shift"], key: "b" }}
@@ -204,6 +211,16 @@ export default function CommandList(
       );
       logger.logValidated();
 
+      // Hermes 后端：读 SKILL.md 全文嵌入 query（不依赖 Hermes 技能索引）
+      let skillContent: string | undefined;
+      if (task.backend === "hermes" && task.skillFile) {
+        try {
+          skillContent = readFileSync(task.skillFile, "utf-8");
+        } catch {
+          // 读不到就让 prompt 原样执行（技能正文缺失，仅任务描述）
+        }
+      }
+
       const result = await executeClaudeCommand(
         {
           prompt: task.prompt,
@@ -211,7 +228,9 @@ export default function CommandList(
           projectDir: task.projectDir,
           claudeBin: task.claudeBin,
           codebuddyBin: task.codebuddyBin,
+          hermesBin: task.hermesBin,
           backend: task.backend,
+          skillContent,
           headlessMode: task.headlessMode,
         },
         logger,
@@ -247,7 +266,12 @@ export default function CommandList(
   async function loadSkills() {
     try {
       const config = getConfig();
-      const availableSkills = scanSkills(config.projectDirs, config.skillsDirs);
+      // 传当前后端：Hermes 时按 .hermes/.agents + ~/.hermes/skills/<分类> 布局扫描
+      const availableSkills = scanSkills(
+        config.projectDirs,
+        config.skillsDirs,
+        selectedBackend,
+      );
       setItems(availableSkills);
     } catch (error) {
       const configError = error as Error & { isConfigError?: boolean };
@@ -489,6 +513,7 @@ export default function CommandList(
           projectDir: config.projectDirs[0],
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
+          hermesBin: config.hermesBin,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -522,6 +547,7 @@ export default function CommandList(
           projectDir,
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
+          hermesBin: config.hermesBin,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           onPid: (pid) => {
@@ -551,6 +577,7 @@ export default function CommandList(
             projectDir,
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
+            hermesBin: config.hermesBin,
             backend: runtimeBackend,
             headlessMode: config.headlessMode,
             onPid: (pid) => {
@@ -764,10 +791,12 @@ export default function CommandList(
         await toast.hide();
         enqueue({
           skillName: skill.name,
+          skillFile: skill.skillFile, // Hermes 后端回放时读取 SKILL.md 全文嵌入 query
           prompt,
           projectDir: skill.projectDir || config.projectDirs[0],
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
+          hermesBin: config.hermesBin,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -801,7 +830,9 @@ export default function CommandList(
           projectDir,
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
+          hermesBin: config.hermesBin,
           backend: runtimeBackend,
+          skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
           headlessMode: config.headlessMode,
           onPid: (pid) => {
             activePids.current[skill.name] = pid;
@@ -830,7 +861,9 @@ export default function CommandList(
             projectDir,
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
+            hermesBin: config.hermesBin,
             backend: runtimeBackend,
+            skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
             headlessMode: config.headlessMode,
             onPid: (pid) => {
               activePids.current[skill.name] = pid;

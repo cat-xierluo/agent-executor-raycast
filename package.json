@@ -83,7 +83,7 @@
       "type": "dropdown",
       "required": false,
       "title": "执行后端",
-      "description": "选择用于执行技能的 Agent CLI（Claude Code 或 CodeBuddy）",
+      "description": "选择用于执行技能的 Agent CLI（Claude Code、CodeBuddy 或 Hermes）",
       "default": "claude",
       "data": [
         {
@@ -93,6 +93,10 @@
         {
           "title": "CodeBuddy",
           "value": "codebuddy"
+        },
+        {
+          "title": "Hermes",
+          "value": "hermes"
         }
       ]
     },
@@ -111,6 +115,14 @@
       "title": "CodeBuddy CLI 可执行文件路径",
       "description": "可选：指定 codebuddy 命令的完整路径（默认：~/.local/bin/codebuddy）",
       "default": "~/.local/bin/codebuddy"
+    },
+    {
+      "name": "hermesBin",
+      "type": "textfield",
+      "required": false,
+      "title": "Hermes CLI 可执行文件路径",
+      "description": "可选：指定 hermes 命令的完整路径（默认：~/.local/bin/hermes）",
+      "default": "~/.local/bin/hermes"
     },
     {
       "name": "headlessMode",
