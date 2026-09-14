@@ -326,13 +326,15 @@ export default function CommandList(
   }
 
   async function loadSkills() {
+    // 时序门：Hermes 后端时，profile 选择未从 LocalStorage 读出前不扫。
+    // 否则首次挂载会先按"无 profile"扫主 Hermes，profile 读出后再扫一遍 profile，
+    // 用户看到"先加载主 Agent 的 skill 再加载 profile 的 skill"双重加载。
+    // 门挡住时直接 return（在 try 外，不触发 finally 的 setIsLoading(false)），
+    // 保持 isLoading=true 的 spinner，避免空 items 闪出"未找到技能"空视图。
+    if (selectedBackend === "hermes" && !profileReady) {
+      return;
+    }
     try {
-      // 时序门：Hermes 后端时，profile 选择未从 LocalStorage 读出前不扫。
-      // 否则首次挂载会先按"无 profile"扫主 Hermes，profile 读出后再扫一遍 profile，
-      // 用户看到"先加载主 Agent 的 skill 再加载 profile 的 skill"双重加载。
-      if (selectedBackend === "hermes" && !profileReady) {
-        return;
-      }
       const config = getConfig();
       // 传当前后端：Hermes 时按 .hermes/.agents + Hermes skills 布局扫描
       // hermesProfileHome 给定时扫 profile 的 skills/（隔离岛），空时扫主 ~/.hermes/skills/
