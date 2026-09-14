@@ -28,6 +28,7 @@ import { RunLogger } from "./utils/logger";
 import { scanSkills, ClaudeSkill, readSkillContent } from "./utils/skills";
 import {
   getSelectedHermesProfile,
+  getSelectedHermesProfileSync,
   resolveProfileHome,
 } from "./utils/hermesProfile";
 import { readFileSync } from "fs";
@@ -120,15 +121,18 @@ export default function CommandList(
     }
   });
 
-  // Hermes profile 选择（LocalStorage 持久化，「选择 Hermes Profile」命令写入；空 = 主 Hermes）
-  // 异步加载后覆盖 config.hermesProfileHome（textfield 偏好仍可作为静态兜底，但命令选择优先）
+  // Hermes profile 选择（「选择 Hermes Profile」命令写入 ~/.hermes/active-profile
+  // + LocalStorage 双写；读取走同步文件快路径——LocalStorage IPC 桥冷启动秒级，
+  // 同步读才能保住秒开）。useState 初始值直接同步算出，无异步空窗。
   const [activeProfileHome, setActiveProfileHome] = useState<
     string | undefined
-  >(undefined);
-  const [profileLabel, setProfileLabel] = useState<string>("主 Hermes");
-  // profile 选择是否已从 LocalStorage 读出。读出前 loadSkills 跳过（Hermes 后端时），
-  // 避免"先扫主 Hermes 再扫 profile"的双重加载时序。
-  const [profileReady, setProfileReady] = useState<boolean>(false);
+  >(() => resolveProfileHome(getSelectedHermesProfileSync()));
+  const [profileLabel, setProfileLabel] = useState<string>(() => {
+    const n = getSelectedHermesProfileSync();
+    return n && resolveProfileHome(n) ? n : "主 Hermes";
+  });
+  // 快路径下 profile 状态在首个渲染帧就已就绪，门恒开（保留字段兼容旧引用）
+  const [profileReady] = useState<boolean>(true);
 
   // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy / Hermes 间轮换）
   const backendToggleAction = (
@@ -223,30 +227,21 @@ export default function CommandList(
     };
   }, []);
 
-  // 初始化 Hermes profile 选择：异步读 LocalStorage，随后按选中 profile 重扫 skills。
-  // 无论是否选中 profile 都必须 setProfileReady(true) 并触发首扫——这是首扫的唯一入口
-  //（mount 时的 loadSkills 被 profileReady 门挡住）。
+  // 初始化 Hermes profile 选择：同步快路径已在 useState 初始值读出。
+  // 这里只做一次旧数据迁移（文件缺失但 LocalStorage 有旧选择 → 回写文件），
+  // 若迁移发现与初始状态不同则修正 state 并重扫。
   useEffect(() => {
     (async () => {
       try {
         const name = await getSelectedHermesProfile();
-        if (name) {
-          const home = resolveProfileHome(name);
-          if (home) {
-            setActiveProfileHome(home);
-            setProfileLabel(name);
-          } else {
-            // 选中但目录已不存在 → 回退主 Hermes
-            setProfileLabel("主 Hermes");
-          }
-        } else {
-          setProfileLabel("主 Hermes");
+        const home = name ? resolveProfileHome(name) : undefined;
+        if ((home || undefined) !== activeProfileHome) {
+          setActiveProfileHome(home);
+          setProfileLabel(home ? name : "主 Hermes");
+          loadSkillsRef.current();
         }
       } catch {
-        // LocalStorage 读取失败 = 主 Hermes，不打扰用户
-      } finally {
-        setProfileReady(true);
-        loadSkillsRef.current();
+        // 读取失败保持同步初始值（主 Hermes），不打扰用户
       }
     })();
   }, []);
