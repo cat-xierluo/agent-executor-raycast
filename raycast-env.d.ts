@@ -46,6 +46,8 @@ declare type Preferences = ExtensionPreferences
 declare namespace Preferences {
   /** Preferences accessible in the `commands` command */
   export type Commands = ExtensionPreferences & {}
+  /** Preferences accessible in the `select-profile` command */
+  export type SelectProfile = ExtensionPreferences & {}
   /** Preferences accessible in the `import-skill` command */
   export type ImportSkill = ExtensionPreferences & {}
   /** Preferences accessible in the `status` command */
@@ -58,6 +60,8 @@ declare namespace Arguments {
   /** https://example.com/x.pdf */
   "url": string
 }
+  /** Arguments passed to the `select-profile` command */
+  export type SelectProfile = {}
   /** Arguments passed to the `import-skill` command */
   export type ImportSkill = {}
   /** Arguments passed to the `status` command */
