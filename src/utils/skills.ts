@@ -242,17 +242,32 @@ export function scanSkills(
   };
 
   // ── Profile 独占模式（Hermes 后端 + 选定 profile）─────────────────────
-  // 语义：只读该 profile 的 skills/<分类>/，其他一切来源（项目目录、
+  // 语义：只读该 profile 的 skills/，其他一切来源（项目目录、
   // ~/.claude/skills、主 ~/.hermes/skills）全部不读。profile 是隔离岛。
+  // 布局兼容两种（判定规则：目录自己有 SKILL.md → 它就是 skill，不展开；
+  // 没有 → 当分类，展开一层找子 skill；两者皆无 → 跳过）：
+  //   分类布局：skills/<分类>/<skill>/SKILL.md
+  //   平铺布局：skills/<skill>/SKILL.md（软链直挂 skills/ 根，无分类层）
   if (backend === "hermes" && hermesProfileHome) {
     const hermesSkillsRoot = join(hermesProfileHome, "skills");
-    if (existsSync(hermesSkillsRoot) && isValidSkillsDir(hermesSkillsRoot)) {
+    if (existsSync(hermesSkillsRoot)) {
       for (const entry of readdirSync(hermesSkillsRoot, { withFileTypes: true })) {
         if (entry.isDirectory() || entry.isSymbolicLink()) {
-          const catDir = join(hermesSkillsRoot, entry.name);
-          if (isValidSkillsDir(catDir)) {
+          const dir = join(hermesSkillsRoot, entry.name);
+          if (isValidSkillDir(dir)) {
+            // 自己就是 skill（平铺布局）：直接作为 skill 扫入
             const skills = scanSkillsDirectory(
-              catDir,
+              hermesSkillsRoot,
+              hermesProfileHome,
+              `Hermes · ${basename(hermesProfileHome)}`,
+            );
+            allSkills.push(...skills);
+            break; // 平铺布局下根即 skills 目录，扫一遍即可
+          }
+          if (isValidSkillsDir(dir)) {
+            // 分类布局：展开分类目录
+            const skills = scanSkillsDirectory(
+              dir,
               hermesProfileHome,
               `Hermes · ${basename(hermesProfileHome)} · ${entry.name}`,
             );
