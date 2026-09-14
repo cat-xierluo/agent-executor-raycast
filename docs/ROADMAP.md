@@ -321,6 +321,23 @@ const child = spawn('/bin/bash', ['-c', bashCommand], {
 | 日志系统改进    | 日志轮转机制，日志压缩存储，日志清理策略，日志性能优化                   | 🟡 中  | ⚪ 待开始   |
 | 状态管理        | 引入状态管理库（如 Zustand），统一状态更新机制，缓存策略优化，状态持久化 | 🟡 中  | ⚪ 待开始   |
 | 错误处理完善    | 网络错误处理，文件权限错误提示，超时处理优化，异常恢复机制               | 🟡 中  | ⚪ 待开始   |
+| Hermes 会话状态回读 | Hermes 后端执行后 Raycast 侧显示"(无输出)"且状态失真（见下）         | 🟠 高  | ⚪ 待开始   |
+
+### Hermes 会话状态回读（2026-09-14 实测记录）
+
+**现象**：Hermes 后端（含 profile 模式）执行 skill 后，Raycast 运行日志显示"(无输出)"、进程 `<defunct>`，但 Hermes 侧会话实际仍在正常运行并产出（实测案例：会话跑了 1h+、233 条消息、117 次工具调用、OCR 完整跑完，最后收尾正常——Raycast 侧却早已报无输出）。
+
+**根因**（两层）：
+
+1. **30 分钟超时不适用 Hermes**：`EXEC_TIMEOUT_MS = 30 * 60 * 1000` 按 Claude Code 一次调用的预期设定。Hermes 是带完整工具链的 agent 循环（117 次工具调用很正常），长任务轻松超 30 分钟。超时后 Raycast resolve 超时错误并 SIGKILL，但 hermes 子进程的内部状态已持久化在 Hermes 侧，继续跑完——两边状态就此分叉。
+2. **无会话状态回读**：Hermes 的会话落在其 state.db（`~/.hermes/state.db` 或 profile 的 `~/.hermes/profiles/<name>/state.db`，sessions 表含 `message_count / tool_call_count / last_activity_at / ended_at`）。Raycast 只看子进程 stdout 生命周期，从不回读会话库——子进程死后无法知道"会话其实还活着/已完成/产出在哪"。
+
+**修复方向**：
+
+- [ ] Hermes 后端超时独立可配（偏好 `hermesTimeoutMinutes`，默认放宽到 120min；或 0=不限）
+- [ ] 执行完成后从 Hermes 会话库回读状态：用 `--pass-session-id` 拿到的 session_id 查 `sessions` 表，展示 `message_count / tool_call_count / last_activity`；超时被杀的 run 定期回查 `ended_at` 判定真实完成时间
+- [ ] 状态页对 Hermes run 增加"会话仍在后台运行"的中间态，而不是直接判死
+- 注意 profile 模式下查库要用对应 profile 的 state.db（HERMES_HOME 注入了哪个就查哪个）
 
 ---
 
