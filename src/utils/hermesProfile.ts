@@ -1,10 +1,42 @@
-import { readFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
 import { LocalStorage } from "@raycast/api";
 
 /** LocalStorage key：用户选中的 Hermes profile 名；空/未设置 = 主 Hermes */
 const SELECTED_PROFILE_KEY = "hermes-selected-profile";
+
+/**
+ * 同步快路径文件：~/.hermes/active-profile（纯文本一行 profile 名）。
+ * LocalStorage 是 Raycast 进程外 IPC 桥，extension 冷启动时首查可能秒级——
+ * profile 选择决定首扫路径，必须同步可读才能秒开。写路径双写（文件+LocalStorage），
+ * 文件为准；文件缺失时（旧版本选择过）异步迁移回写。
+ */
+const ACTIVE_PROFILE_FILE = join(homedir(), ".hermes", "active-profile");
+
+/** 同步读取当前选中 profile；空字符串 = 主 Hermes。文件不存在时返回空（未选过）。 */
+export function getSelectedHermesProfileSync(): string {
+  try {
+    if (!existsSync(ACTIVE_PROFILE_FILE)) return "";
+    return readFileSync(ACTIVE_PROFILE_FILE, "utf-8").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** 双写：快路径文件 + LocalStorage（兼容旧读取路径）。 */
+async function writeSelectedHermesProfile(name: string): Promise<void> {
+  try {
+    writeFileSync(ACTIVE_PROFILE_FILE, name, "utf-8");
+  } catch {
+    // 文件写失败不致命，LocalStorage 仍生效
+  }
+  if (name) {
+    await LocalStorage.setItem(SELECTED_PROFILE_KEY, name);
+  } else {
+    await LocalStorage.removeItem(SELECTED_PROFILE_KEY);
+  }
+}
 
 export interface HermesProfileInfo {
   name: string; // profile 目录名（即 profile 名）
@@ -15,10 +47,22 @@ export interface HermesProfileInfo {
 
 /**
  * 读取当前选中的 Hermes profile 名；空字符串 = 主 Hermes。
+ * 快路径文件优先；文件缺失时回落 LocalStorage 并迁移回写文件。
  */
 export async function getSelectedHermesProfile(): Promise<string> {
+  const fromFile = getSelectedHermesProfileSync();
+  if (fromFile) return fromFile;
   try {
-    return ((await LocalStorage.getItem(SELECTED_PROFILE_KEY)) as string) || "";
+    const legacy = ((await LocalStorage.getItem(SELECTED_PROFILE_KEY)) as string) || "";
+    if (legacy) {
+      // 旧数据迁移：写入快路径文件，下次同步可读
+      try {
+        writeFileSync(ACTIVE_PROFILE_FILE, legacy, "utf-8");
+      } catch {
+        // 迁移失败不影响本次返回
+      }
+    }
+    return legacy;
   } catch {
     return "";
   }
@@ -28,11 +72,7 @@ export async function getSelectedHermesProfile(): Promise<string> {
  * 保存选中的 Hermes profile 名；传空字符串 = 回到主 Hermes。
  */
 export async function setSelectedHermesProfile(name: string): Promise<void> {
-  if (name) {
-    await LocalStorage.setItem(SELECTED_PROFILE_KEY, name);
-  } else {
-    await LocalStorage.removeItem(SELECTED_PROFILE_KEY);
-  }
+  await writeSelectedHermesProfile(name);
 }
 
 /**
