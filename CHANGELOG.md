@@ -6,6 +6,10 @@
 
 ### 新增 (Added)
 
+- **Hermes Profile 动态选择器**：新增「选择 Hermes Profile」命令（select-profile），动态扫描 `~/.hermes/profiles/` 列出所有 profile（含 description 与 skill 数），回车即切换；LocalStorage 持久化，后续新增 bot（新建 profile 目录）自动出现在列表中，无需改代码。
+  - 主界面 ActionPanel 新增「Hermes Profile：当前值」指示（`Cmd+Shift+P` 跳转选择器）；当前选中的 profile 显示 ✓。
+  - `commands.tsx` 组件层新增 `activeProfileHome` 状态：异步读 LocalStorage 后**覆盖 textfield 偏好**，7 处执行/扫描路径统一生效；清空选择即回主 Hermes。
+  - 未选择任何 profile 时默认主 Hermes（`~/.hermes/`），行为与 PR #4 一致。
 - **Hermes 后端适配（无头模式）**：执行后端新增 Hermes Agent CLI，与 Claude Code / CodeBuddy 并列，可在偏好或 UI 中三方切换（`Cmd+Shift+B` 轮换）。
   - 新增 Raycast 偏好「Hermes CLI 可执行文件路径」（`hermesBin`，textfield，默认 `~/.local/bin/hermes`）；`backend` dropdown 增加 `Hermes` 选项。
   - `src/utils/claude.ts` 新增 `buildHermesArgs()` 与 `parseHermesOutput()`：Hermes 走 `chat -q <query> --oneshot -Q --pass-session-id --in <workDir>` 参数体系（与 Claude 的 `--print --output-format stream-json` 完全不同）；输出为纯文本，`session_id:` 行位置不稳定（带 `--in` 时在末尾，否则在开头），解析器做全量位置无关匹配并从正文剔除该行；成败判定用 exitCode（Hermes 无 `is_error` 字段）。

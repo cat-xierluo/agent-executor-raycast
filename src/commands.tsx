@@ -14,6 +14,8 @@ import {
   openCommandPreferences,
   Detail,
   LaunchProps,
+  launchCommand,
+  LaunchType,
 } from "@raycast/api";
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -24,6 +26,10 @@ import {
 } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
 import { scanSkills, ClaudeSkill, readSkillContent } from "./utils/skills";
+import {
+  getSelectedHermesProfile,
+  resolveProfileHome,
+} from "./utils/hermesProfile";
 import { readFileSync } from "fs";
 import { toggleSkillPinned, toggleSkillNew } from "./utils/commandMetadata";
 import { parseNoteInput } from "./utils/urlDetector";
@@ -114,6 +120,13 @@ export default function CommandList(
     }
   });
 
+  // Hermes profile 选择（LocalStorage 持久化，「选择 Hermes Profile」命令写入；空 = 主 Hermes）
+  // 异步加载后覆盖 config.hermesProfileHome（textfield 偏好仍可作为静态兜底，但命令选择优先）
+  const [activeProfileHome, setActiveProfileHome] = useState<
+    string | undefined
+  >(undefined);
+  const [profileLabel, setProfileLabel] = useState<string>("主 Hermes");
+
   // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy / Hermes 间轮换）
   const backendToggleAction = (
     <Action
@@ -129,6 +142,23 @@ export default function CommandList(
       }
       icon={Icon.Switch}
       shortcut={{ modifiers: ["cmd", "shift"], key: "b" }}
+    />
+  );
+
+  // Hermes profile 指示 + 跳转选择器（「选择 Hermes Profile」命令，动态扫描所有 profile）
+  const profileToggleAction = (
+    <Action
+      title={`Hermes Profile：${profileLabel}`}
+      onAction={() =>
+        launchCommand({
+          name: "select-profile",
+          type: LaunchType.UserInitiated,
+        }).catch(() => {
+          // 选择器打不开不致命
+        })
+      }
+      icon={Icon.Person}
+      shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
     />
   );
 
@@ -188,6 +218,27 @@ export default function CommandList(
       clearInterval(interval);
       clearInterval(fileRefreshInterval);
     };
+  }, []);
+
+  // 初始化 Hermes profile 选择：异步读 LocalStorage，随后按选中 profile 重扫 skills
+  useEffect(() => {
+    (async () => {
+      try {
+        const name = await getSelectedHermesProfile();
+        if (name) {
+          const home = resolveProfileHome(name);
+          if (home) {
+            setActiveProfileHome(home);
+            setProfileLabel(name);
+            loadSkillsRef.current();
+          }
+        } else {
+          setProfileLabel("主 Hermes");
+        }
+      } catch {
+        // LocalStorage 读取失败 = 主 Hermes，不打扰用户
+      }
+    })();
   }, []);
 
   function loadRunningCount() {
@@ -273,7 +324,7 @@ export default function CommandList(
         config.projectDirs,
         config.skillsDirs,
         selectedBackend,
-        config.hermesProfileHome,
+        activeProfileHome ?? config.hermesProfileHome,
       );
       setItems(availableSkills);
     } catch (error) {
@@ -517,7 +568,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
-          hermesProfileHome: config.hermesProfileHome,
+          hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -552,7 +603,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
-          hermesProfileHome: config.hermesProfileHome,
+          hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           onPid: (pid) => {
@@ -583,7 +634,7 @@ export default function CommandList(
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
-            hermesProfileHome: config.hermesProfileHome,
+            hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
             backend: runtimeBackend,
             headlessMode: config.headlessMode,
             onPid: (pid) => {
@@ -803,7 +854,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
-          hermesProfileHome: config.hermesProfileHome,
+          hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -838,7 +889,7 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
-          hermesProfileHome: config.hermesProfileHome,
+          hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           backend: runtimeBackend,
           skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
           headlessMode: config.headlessMode,
@@ -870,7 +921,7 @@ export default function CommandList(
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
-            hermesProfileHome: config.hermesProfileHome,
+            hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
             backend: runtimeBackend,
             skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
             headlessMode: config.headlessMode,
@@ -999,6 +1050,7 @@ export default function CommandList(
       actions={
         <ActionPanel>
           {backendToggleAction}
+          {profileToggleAction}
           <Action
             title="刷新列表"
             onAction={loadSkills}
@@ -1229,6 +1281,8 @@ export default function CommandList(
                       />
                     )}
                     {backendToggleAction}
+                    {profileToggleAction}
+          {profileToggleAction}
                   </ActionPanel>
                 }
               />
@@ -1338,6 +1392,8 @@ export default function CommandList(
                       />
                     )}
                     {backendToggleAction}
+                    {profileToggleAction}
+          {profileToggleAction}
                     <Action
                       title="切换置顶状态"
                       onAction={() => {

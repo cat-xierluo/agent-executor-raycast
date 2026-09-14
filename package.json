@@ -28,6 +28,13 @@
       ]
     },
     {
+      "name": "select-profile",
+      "title": "选择 Hermes Profile",
+      "description": "动态扫描 ~/.hermes/profiles/ 并切换当前使用的 profile（空 = 主 Hermes）",
+      "icon": "terminal.png",
+      "mode": "view"
+    },
+    {
       "name": "import-skill",
       "title": "导入 Skill",
       "description": "从本地目录或 URL 链接导入 Skill",
