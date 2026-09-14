@@ -10,10 +10,12 @@ const QUEUE_FILE = join(LOG_DIR, "task-queue.json");
 export interface QueuedTask {
   id: string;
   skillName: string;
+  skillFile?: string; // Hermes 后端回放时读取 SKILL.md 全文嵌入 query
   prompt: string;
   projectDir: string;
   claudeBin: string;
   codebuddyBin?: string;
+  hermesBin?: string;
   backend?: AgentBackend;
   headlessMode: boolean;
   streamingMode: boolean;

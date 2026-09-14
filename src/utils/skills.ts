@@ -12,7 +12,7 @@ import { join, basename, resolve } from "path";
 import { Icon } from "@raycast/api";
 import { execSync } from "child_process";
 import { homedir } from "os";
-import { getProjectName } from "./claude";
+import { getProjectName, isValidSkillsDir } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
 import { readStats } from "./stats";
 import { countExecutionsFromLog } from "./status";
@@ -141,9 +141,18 @@ function scanSkillsDirectory(
 }
 
 /**
- * 扫描单个项目的 .claude/skills/ 目录
+ * 扫描单个项目的技能目录：Claude 后端扫 .claude/skills，
+ * Hermes 后端扫 .hermes/skills 与 .agents/skills（Hermes 的项目级发现路径）。
  */
-function scanSingleProjectSkills(projectDir: string): ClaudeSkill[] {
+function scanSingleProjectSkills(projectDir: string, backend?: string): ClaudeSkill[] {
+  if (backend === "hermes") {
+    const skills: ClaudeSkill[] = [];
+    const projectName = getProjectName(projectDir);
+    for (const sub of [".hermes/skills", ".agents/skills"]) {
+      skills.push(...scanSkillsDirectory(join(projectDir, sub), projectDir, projectName));
+    }
+    return skills;
+  }
   return scanSkillsDirectory(
     join(projectDir, ".claude/skills"),
     projectDir,
@@ -163,8 +172,9 @@ const SKILLS_CACHE_TTL = 10000;
 export function scanSkills(
   projectDirs: string[],
   standaloneSkillsDirs: string[] = [],
+  backend?: string,
 ): ClaudeSkill[] {
-  const cacheKey = JSON.stringify({ projectDirs, standaloneSkillsDirs });
+  const cacheKey = JSON.stringify({ projectDirs, standaloneSkillsDirs, backend });
   if (
     skillsCache &&
     skillsCacheKey === cacheKey &&
@@ -176,7 +186,7 @@ export function scanSkills(
   const allSkills: ClaudeSkill[] = [];
 
   for (const dir of projectDirs) {
-    const skills = scanSingleProjectSkills(dir);
+    const skills = scanSingleProjectSkills(dir, backend);
     allSkills.push(...skills);
   }
 
@@ -189,6 +199,27 @@ export function scanSkills(
         "默认 Skills",
       );
       allSkills.push(...skills);
+    }
+    // Hermes 后端：额外扫描 ~/.hermes/skills/<分类>/<技能>/（比 Claude 深一层分类目录）。
+    // Hermes 的 -s 预加载从这个索引解析技能名，不扫这里则 Hermes 后端永远 Unknown skill。
+    if (backend === "hermes") {
+      const hermesUserSkills = join(homedir(), ".hermes/skills");
+      if (isValidSkillsDir(hermesUserSkills)) {
+        // 分类目录展开：每个分类子目录都是一个 skills 目录
+        for (const entry of readdirSync(hermesUserSkills, { withFileTypes: true })) {
+          if (entry.isDirectory() || entry.isSymbolicLink()) {
+            const catDir = join(hermesUserSkills, entry.name);
+            if (isValidSkillsDir(catDir)) {
+              const skills = scanSkillsDirectory(
+                catDir,
+                defaultExecutionProjectDir,
+                `Hermes · ${entry.name}`,
+              );
+              allSkills.push(...skills);
+            }
+          }
+        }
+      }
     }
   }
 

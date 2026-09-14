@@ -11,14 +11,15 @@ import {
 } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 
-/** 执行后端：Claude Code 或 CodeBuddy（两者 CLI 兼容，输出格式基本一致） */
-export type AgentBackend = "claude" | "codebuddy";
+/** 执行后端：Claude Code、CodeBuddy（CLI 兼容）或 Hermes（独立参数体系） */
+export type AgentBackend = "claude" | "codebuddy" | "hermes";
 
 export interface AgentExecutorConfig {
   projectDirs: string[]; // 扫描 .claude/commands/ 目录
   skillsDirs: string[]; // 扫描 ~/.claude/skills/ 目录
   claudeBin: string;
   codebuddyBin: string;
+  hermesBin: string;
   backend: AgentBackend;
   headlessMode: boolean;
   streamingMode: boolean;
@@ -33,6 +34,7 @@ export interface Preferences {
   backend?: AgentBackend;
   claudeBin?: string;
   codebuddyBin?: string;
+  hermesBin?: string;
   headlessMode?: boolean;
   enableDefaultSkills?: boolean; // 新增：是否启用默认 ~/.claude/skills/
   streamingMode?: boolean; // 新增：是否启用流式输出
@@ -63,11 +65,14 @@ export function isValidSkillsDir(dir: string): boolean {
 }
 
 /**
- * 验证目录是否是有效的项目目录（包含 .claude/skills/）
+ * 验证目录是否是有效的项目目录（包含 .claude/skills/ 或 Hermes 的 .hermes/skills/）
  */
 export function isValidProjectDir(dir: string): boolean {
-  const skillsDir = join(dir, ".claude/skills");
-  return existsSync(skillsDir);
+  return (
+    existsSync(join(dir, ".claude/skills")) ||
+    existsSync(join(dir, ".hermes/skills")) ||
+    existsSync(join(dir, ".agents/skills"))
+  );
 }
 
 /**
@@ -133,8 +138,16 @@ export function loadConfig(): AgentExecutorConfig {
     homedir(),
   );
 
+  const hermesBin = (prefs.hermesBin || "~/.local/bin/hermes").replace(
+    /^~/,
+    homedir(),
+  );
+
   // 执行后端默认 claude（向后兼容）
-  const backend: AgentBackend = prefs.backend === "codebuddy" ? "codebuddy" : "claude";
+  const backend: AgentBackend =
+    prefs.backend === "codebuddy" || prefs.backend === "hermes"
+      ? prefs.backend
+      : "claude";
 
   // headlessMode 默认为 true（向后兼容）
   const headlessMode = prefs.headlessMode !== false;
@@ -158,6 +171,7 @@ export function loadConfig(): AgentExecutorConfig {
     skillsDirs,
     claudeBin,
     codebuddyBin,
+    hermesBin,
     backend,
     headlessMode,
     streamingMode,
@@ -176,17 +190,78 @@ export function getConfig(): AgentExecutorConfig {
 
 /**
  * 根据后端解析对应的 CLI 可执行文件路径。
- * codebuddy 后端用 codebuddyBin，否则用 claudeBin（缺省回退到默认路径）。
+ * codebuddy 后端用 codebuddyBin，hermes 后端用 hermesBin，否则用 claudeBin（缺省回退到默认路径）。
  */
 export function resolveBackendBin(
   backend: AgentBackend | undefined,
   claudeBin?: string,
   codebuddyBin?: string,
+  hermesBin?: string,
 ): string {
   if (backend === "codebuddy") {
     return codebuddyBin || join(homedir(), ".local/bin/codebuddy");
   }
+  if (backend === "hermes") {
+    return hermesBin || join(homedir(), ".local/bin/hermes");
+  }
   return claudeBin || join(homedir(), ".local/bin/claude");
+}
+
+/**
+ * 解析 Hermes `chat -q ... -Q --pass-session-id` 的 stdout。
+ * 实测 session_id 行位置不稳定：无 --in 时在头部，带项目目录 --in 时在尾部，
+ * 因此全文扫描该行并从输出中剥离，其余为最终回复正文。
+ */
+export function parseHermesOutput(stdout: string): {
+  output: string;
+  sessionId?: string;
+} {
+  const lines = stdout.split("\n");
+  let sessionId: string | undefined;
+  const kept: string[] = [];
+  for (const line of lines) {
+    const m = line.match(/^session_id:\s*(\S+)\s*$/);
+    if (m && !sessionId) {
+      sessionId = m[1];
+      continue; // 剥离该行，不进入正文
+    }
+    kept.push(line);
+  }
+  const output = kept.join("\n").trim();
+  return { output, sessionId };
+}
+
+/**
+ * 为 Hermes 后端构建 `chat` 子命令参数。
+ * - prompt 直接作为 -q 查询（参数数组传递，无 shell 转义问题）
+ * - --oneshot + -Q：程序化单次执行，只输出最终回复
+ * - --pass-session-id：输出 session_id 行，供恢复对话
+ * - --in 指定工作目录：Hermes 按自身规则发现 .hermes/skills、.agents/skills
+ *
+ * 不用 `-s` 预加载：Hermes 的技能索引只覆盖自己的目录体系（~/.hermes/skills/<分类>/<技能>、
+ * 项目 .hermes/skills、.agents/skills），不扫 Claude 布局的 .claude/skills——Raycast 扫出的
+ * 技能名传 `-s` 会得到 "Unknown skill(s)" 退出码 1（实测）。因此由调用方把 SKILL.md 全文
+ * 读出后作为 skillContent 传入，直接嵌入 query，语义与 Claude Code 的 Skill 工具注入对齐。
+ */
+export function buildHermesArgs(
+  prompt: string,
+  workDir: string,
+  skillContent?: string,
+): string[] {
+  let query = prompt;
+  if (skillContent && skillContent.trim()) {
+    query = `${skillContent.trim()}\n\n---\n\n# 任务\n${prompt}`;
+  }
+  return [
+    "chat",
+    "-q",
+    query,
+    "--oneshot",
+    "-Q",
+    "--pass-session-id",
+    "--in",
+    workDir,
+  ];
 }
 
 /**
@@ -255,7 +330,9 @@ export interface ClaudeExecutionOptions {
   projectDir: string;
   claudeBin?: string;
   codebuddyBin?: string;
+  hermesBin?: string;
   backend?: AgentBackend;
+  skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
   headlessMode?: boolean;
   onPid?: (pid: number) => void;
 }
@@ -285,7 +362,9 @@ export interface ClaudeStreamingOptions {
   projectDir: string;
   claudeBin?: string;
   codebuddyBin?: string;
+  hermesBin?: string;
   backend?: AgentBackend;
+  skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
   headlessMode?: boolean;
   onPid?: (pid: number) => void;
   onChunk?: StreamingCallback; // 流式输出回调
@@ -387,7 +466,9 @@ export async function executeClaudeStreaming(
     projectDir,
     claudeBin: customClaudeBin,
     codebuddyBin: customCodebuddyBin,
+    hermesBin: customHermesBin,
     backend,
+    skillContent,
     prompt,
     headlessMode = true,
     onPid,
@@ -398,6 +479,7 @@ export async function executeClaudeStreaming(
     backend,
     customClaudeBin,
     customCodebuddyBin,
+    customHermesBin,
   );
   const startTime = Date.now();
 
@@ -426,15 +508,20 @@ export async function executeClaudeStreaming(
 
     // 使用参数数组传递 prompt，避免 shell 转义和注入问题
     // 无头模式注入系统级前置指令（压制提问/预设外传授权），见 resolveHeadlessPreamble()
-    const streamArgs = [
-      "-p",
-      prompt,
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--include-partial-messages",
-    ];
-    const streamPreamble = resolveHeadlessPreamble();
+    // Hermes 后端：独立的 chat 参数体系（无 --output-format stream-json），
+    // 逐行直传 stdout 作为流式块，结束时用 parseHermesOutput 提取正文与 session_id
+    const isHermes = backend === "hermes";
+    const streamArgs = isHermes
+      ? buildHermesArgs(prompt, projectDir, skillContent)
+      : [
+          "-p",
+          prompt,
+          "--output-format",
+          "stream-json",
+          "--verbose",
+          "--include-partial-messages",
+        ];
+    const streamPreamble = isHermes ? "" : resolveHeadlessPreamble();
     if (streamPreamble) {
       streamArgs.push("--append-system-prompt", streamPreamble);
     }
@@ -568,6 +655,25 @@ export async function executeClaudeStreaming(
       const exitCode = code ?? (signal ? 1 : 0);
       clearTimeout(execTimeoutTimer);
 
+      // Hermes 后端：无 is_error 字段，exitCode 即成败；用 parseHermesOutput
+      // 提取正文（剥掉 session_id 头行）与会话 ID
+      if (isHermes) {
+        const parsed = parseHermesOutput(fullOutput);
+        const hSessionId = parsed.sessionId || sessionId;
+        const hSuccess = exitCode === 0 && parsed.output.length > 0;
+        resolve({
+          success: hSuccess,
+          output: parsed.output || "(无输出)",
+          error: !hSuccess ? fullOutput : undefined,
+          exitCode,
+          duration,
+          pid,
+          sessionId: hSessionId,
+          apiSuccess: exitCode === 0 ? true : undefined,
+        });
+        return;
+      }
+
       // 优先使用流式解析出的 is_error，回退到从 fullOutput 正则解析
       let apiSuccess = streamApiSuccess;
       if (apiSuccess === undefined) {
@@ -630,7 +736,9 @@ export async function executeClaudeCommand(
     projectDir,
     claudeBin: customClaudeBin,
     codebuddyBin: customCodebuddyBin,
+    hermesBin: customHermesBin,
     backend,
+    skillContent,
     prompt,
     headlessMode = true,
     onPid,
@@ -639,6 +747,7 @@ export async function executeClaudeCommand(
     backend,
     customClaudeBin,
     customCodebuddyBin,
+    customHermesBin,
   );
 
   const startTime = Date.now();
@@ -761,15 +870,19 @@ end tell`;
       // 无头模式注入系统级前置指令（压制提问/预设外传授权），见 resolveHeadlessPreamble()
       // 统一使用 stream-json 逐行输出：--output-format json 会把结果缓冲到最后一次性写 stdout，
       // 进程异常退出时 stdout 为空导致结果/ session 全部丢失（Claude 与 CodeBuddy 都出现过）。
-      const printArgs = [
-        "--print",
-        "--dangerously-skip-permissions",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        prompt,
-      ];
-      const printPreamble = resolveHeadlessPreamble();
+      // Hermes 后端：chat 子命令参数体系，无 stream-json，close 时用 parseHermesOutput 解析。
+      const isHermes = backend === "hermes";
+      const printArgs = isHermes
+        ? buildHermesArgs(prompt, projectDir, skillContent)
+        : [
+            "--print",
+            "--dangerously-skip-permissions",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            prompt,
+          ];
+      const printPreamble = isHermes ? "" : resolveHeadlessPreamble();
       if (printPreamble) {
         printArgs.push("--append-system-prompt", printPreamble);
       }
@@ -835,8 +948,14 @@ end tell`;
         let apiSuccess: boolean | undefined;
 
         try {
-          // 读取完整输出
-          if (existsSync(tempOutputFile)) {
+          // Hermes 后端：纯文本输出（session_id 头行 + 正文），走专用解析
+          if (backend === "hermes") {
+            const rawOutput = stdout + stderr;
+            const parsedH = parseHermesOutput(rawOutput);
+            output = parsedH.output;
+            if (parsedH.sessionId) sessionId = parsedH.sessionId;
+            apiSuccess = exitCode === 0 ? true : undefined;
+          } else if (existsSync(tempOutputFile)) {
             const rawOutput =
               stdout + stderr || readFileSync(tempOutputFile, "utf-8");
 

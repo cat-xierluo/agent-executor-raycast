@@ -6,6 +6,15 @@
 
 ### 新增 (Added)
 
+- **Hermes 后端适配（无头模式）**：执行后端新增 Hermes Agent CLI，与 Claude Code / CodeBuddy 并列，可在偏好或 UI 中三方切换（`Cmd+Shift+B` 轮换）。
+  - 新增 Raycast 偏好「Hermes CLI 可执行文件路径」（`hermesBin`，textfield，默认 `~/.local/bin/hermes`）；`backend` dropdown 增加 `Hermes` 选项。
+  - `src/utils/claude.ts` 新增 `buildHermesArgs()` 与 `parseHermesOutput()`：Hermes 走 `chat -q <query> --oneshot -Q --pass-session-id --in <workDir>` 参数体系（与 Claude 的 `--print --output-format stream-json` 完全不同）；输出为纯文本，`session_id:` 行位置不稳定（带 `--in` 时在末尾，否则在开头），解析器做全量位置无关匹配并从正文剔除该行；成败判定用 exitCode（Hermes 无 `is_error` 字段）。
+  - **技能内容直嵌 query（绕开目录错配）**：Hermes 与 Claude Code 的技能目录布局不同（Hermes 为 `.hermes/skills/<分类>/<技能>/`，深一层；且 `-s` 只认 Hermes 自身索引，Raycast 扫到的技能传入会 `Unknown skill` 实测报错）。因此 Hermes 后端不传 `/skill-name` slash 前缀，改为把 SKILL.md 全文读出嵌入 query（`skillContent` 字段），语义对齐 Claude Code 的 Skill 工具注入。
+  - **技能扫描按后端分流**：`scanSkills()` 新增 `backend` 参数——Hermes 后端扫项目 `.hermes/skills` + `.agents/skills` 及用户级 `~/.hermes/skills/<分类>/`（逐分类展开）；Claude 后端维持 `.claude/skills` 不变。`isValidProjectDir()` 同时接受三种布局。
+  - `taskQueue.ts` 的 `QueuedTask` 增加 `skillFile`/`hermesBin`，排队回放时按需读取 SKILL.md 嵌入；`raycast-env.d.ts` 同步偏好类型。
+
+### 改进 (Improved)
+
 - **CodeBuddy 后端适配（无头模式）**：执行后端不再局限于 Claude Code，可在 Raycast 偏好中切换默认后端，也可在插件 UI 中临时切换为 CodeBuddy CLI。
   - 新增 Raycast 偏好「执行后端」（`backend`，dropdown，默认 `claude`）与「CodeBuddy CLI 可执行文件路径」（`codebuddyBin`，textfield，默认 `~/.local/bin/codebuddy`）。
   - **UI 内执行后端切换**：`commands.tsx` 新增 `selectedBackend` 状态（默认取全局偏好），列表级、自由指令、每个技能的 ActionPanel 均提供「执行后端：Claude Code / CodeBuddy」切换按钮（快捷键 `Cmd+Shift+B`），执行时以当前选中后端为准，无需进设置页。

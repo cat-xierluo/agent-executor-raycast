@@ -18,12 +18,14 @@ type ExtensionPreferences = {
   "projectDir4"?: string,
   /** 项目目录 5 - 第五个项目目录（可选） */
   "projectDir5"?: string,
-  /** 执行后端 - 选择用于执行技能的 Agent CLI（Claude Code 或 CodeBuddy） */
-  "backend": "claude" | "codebuddy",
+  /** 执行后端 - 选择用于执行技能的 Agent CLI（Claude Code、CodeBuddy 或 Hermes） */
+  "backend": "claude" | "codebuddy" | "hermes",
   /** Claude CLI 可执行文件路径 - 可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude） */
   "claudeBin": string,
   /** CodeBuddy CLI 可执行文件路径 - 可选：指定 codebuddy 命令的完整路径（默认：~/.local/bin/codebuddy） */
   "codebuddyBin": string,
+  /** Hermes CLI 可执行文件路径 - 可选：指定 hermes 命令的完整路径（默认：~/.local/bin/hermes） */
+  "hermesBin": string,
   /** 后台运行模式 - 启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。 */
   "headlessMode": boolean,
   /** 启用默认 Skills 目录 - 自动扫描 ~/.claude/skills/ 目录中的 Skills */
