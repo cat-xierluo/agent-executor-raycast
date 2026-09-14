@@ -30,6 +30,7 @@
 
 ### 修复 (Fixed)
 
+- **Hotkey/Quicklink/Universal Action 触发命令时被 Raycast 强制弹出「Welcome to Agent Executor — Before you can start using this command, you will need to add a few things to the settings」拦截页，每次都要按 ⌘↩ 才能进主界面**：根因不是偏好缺失（`projectDir1` 已正常配置），而是 `package.json` 中 `preferences.headlessPreamble.type` 误写为 `"textarea"` —— Raycast manifest schema 合法的 preference `type` 仅 `textfield` / `password` / `dropdown` / `checkbox` / `appPicker` / `file` / `directory`（官方 docs/information/manifest.md），`textarea` 不在枚举内。schema 校验失败后 Raycast 把整个 manifest 判为 invalid，每次启动 `commands` 命令都会回落到系统 Welcome 拦截页。本地 `ray lint` 此前一直在报的 `144:14 must be equal to one of the allowed values` 警告就是这个根因的直白提示。修复：`type: "textarea" → "textfield"`，description 同步说明「Raycast preference 无 textarea 类型，长文本可粘贴进 textfield」。验证：本地 `npm run lint` 在切换后不再报 `144:14 allowed values`；实际生效需 `ray develop` 重读 manifest 后用 Hotkey 触发一次。
 - **无头执行结果/会话捕获丢失（stdout 为空 + 进程变僵尸导致任务卡死，Claude 与 CodeBuddy 均存在）**：非流式路径原本用 `--output-format json`，该格式会把最终结果**缓冲到最后一次性写入 stdout**，进程异常退出/未回收时 stdout 为空，导致结果文本和 `session_id` 全部丢失，`executeClaudeCommand` 的 promise 永久挂起，任务在 UI 里一直显示「执行中」、日志停在 `executing`，事后靠状态页 `pid_detection` 兜底恢复成 `failed`（8/12、8/13 的 `/pdf-processor` 任务即此现象）。修复：
   - `src/utils/claude.ts` 的 `executeClaudeCommand`：**Claude 与 CodeBuddy 统一改用 `--output-format stream-json --verbose`** 逐行输出（实测两者均稳定吐最终 `result` 行，含 `result`/`is_error`/`session_id`；Claude 的 stream-json 要求带 `--verbose`）。
   - 新增 `parsePrintOutput()` 统一解析三种格式（Claude 单对象 / CodeBuddy json 数组 / stream-json 行），取最后一个 `result` 行。

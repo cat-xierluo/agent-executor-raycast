@@ -190,3 +190,59 @@ getSelectedText()  (mount 时前台仍持有选中文本)
 
 - `npm run typescript` 通过
 - `npm run lint` 仅遗留预先存在的 `package.json` author 404 警告（与本次改动无关）
+
+## 2026-08-28 — `headlessPreamble.type` 由 `textarea` 改为 `textfield`（修复 Welcome 拦截页）
+
+### 背景
+
+Hotkey / Quicklink / Universal Action 触发 `commands` 命令时，每次都被 Raycast 系统「Welcome to Agent Executor — Before you can start using this command, you will need to add a few things to the settings」拦截，必须按 ⌘↩ 才能进主界面。本会话中最初把它归因到 `projectDir1.required: true`，做了 `required: true → false` 的修改，但用户实测后无效，证实为错诊。
+
+### 根因
+
+`package.json` 的 preferences 数组里，`headlessPreamble`（commit `309a84e` "feat: 无头模式注入系统级前置指令..." 引入）声明了 `"type": "textarea"`。查 Raycast 官方 docs（`extensions/docs/information/manifest.md`）：
+
+> 合法的 preference `type` 仅 `textfield` / `password` / `dropdown` / `checkbox` / `appPicker` / `file` / `directory`。
+
+`textarea` 不在枚举内。Manifest schema 校验失败时 Raycast 把整份 manifest 判为 invalid，每次启动 `commands` 命令都会落到系统 Welcome 拦截页；扩展本身仍能跑（用户能看到主界面、能在 ⌘↩ 之后正常工作），但入口仪式变得强制且不明确。
+
+本地 `ray lint` 一直在报的 `144:14 must be equal to one of the allowed values` 警告就是这个根因的精准提示——上一轮我把它当成「与本次无关的 baseline 警告」直接跳过，是错诊的最直接原因。
+
+### 排查岔路与教训
+
+第一轮诊断做错的地方：
+
+1. **看到 screenshot「you will need to add a few things to the settings」就等同假设「required 偏好缺失」**——但这条文案是 Raycast Welcome 拦截页的通用模板，既会因 required 偏好缺失触发，也会因整个 manifest schema 校验失败触发。前者是「特定字段空」分支，后者是「整份 manifest 被认作 invalid」分支，路由不通。
+2. **浏览 package.json 时只 grep `required: true`**——没有把 lint 报的 144:14 警告列入「待办」清单（典型工单式「只解决我自己列的项」偏差）。
+3. **没核对 Raycast 官方 schema**——`Context7` 一查就把 `textarea` 的非法性钉死，但我没在 Phase 1 调研中调用。
+
+归纳：**Phase 1 调研要把 lint/校验反馈中的任何警告都当成潜在根因候选，不因为与我的初判无关就当 baseline 噪音放过。**
+
+### 决策与实现（`package.json`）
+
+- `headlessPreamble.type: "textarea" → "textfield"`
+- `description` 末尾追加「Raycast preference 无 textarea 类型，长文本可粘贴进 textfield」以提示用户在偏好 UI 看到的是单行 input 时不会困惑
+- 回退之前误改的 `projectDir1.required: false → true`（已恢复原文）
+
+### 替代方案考量
+
+- **保留 `textarea`，把它改成多行 textfield**——Raycast 无 multi-line preference 类型，只能 `textfield`。`textfield` 支持粘贴长字符串，长 system preamble 放在单行 input 在视觉上略奇怪但不影响功能。
+- **删掉 `headlessPreamble` 用户可配功能，全部用内置默认**——会牺牲用户覆盖能力，不接受。
+- **改用 `textfield` + 在 `description` 里写长文本示例**——折中处理。即当前做法。
+
+### 兼容性
+
+- 对所有用户：再触发 Hotkey 时 Welcome 页消失，直接进主界面。无其他行为变化。
+- 对已经填过 `headlessPreamble` 的用户（理论上几乎没有，因为字段被 textarea 控件显示异常，实际没办法正常填）：保留其值不变。`ray develop` / `ray build` 不会清空已设置偏好。
+- 对未来想自定义 preamble 的用户：现在能在 Raycast 偏好里正常看到该文本字段并粘贴长文本（textfield 接长字符串没问题）。
+
+### 验证
+
+- `npm run typescript` 通过
+- `npm run lint` 修复前后对比：修复前含 `144:14 must be equal to one of the allowed values`、修复后该警告消失（仍会报 `7:12 Invalid author "maoking"` 的 404、Prettier 在 `commands.tsx` / `claude.ts` 的样式问题——均为预存在）
+- 端到端：跑 `ray develop` → 在 Raycast 触发对应 Hotkey，应当直接进入主界面不再有 ⌘↩ 提示
+
+### 重新评估条件
+
+- 如果 Raycast 后续加入 `textarea` type；或为长文本需求加新控件 → 可把 `headlessPreamble` 切回去并保留 description 注释。
+- 如果 lint 报告任何 `package.json` schema warning：**必须**当成根因候选调查，不再按 baseline 噪音略过（参见「排查岔路与教训」）。
+- 如果出现新的 Welcome 拦截页投诉：从「required 偏好缺失」「manifest schema 不合法」「预设不匹配当前 OS/版本」三条线并行查证，不再单线假设。
