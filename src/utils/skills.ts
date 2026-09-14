@@ -191,6 +191,80 @@ export function scanSkills(
 
   const allSkills: ClaudeSkill[] = [];
 
+  // 尾部处理（去重/元数据/统计/排序/缓存）——profile 独占模式提前 return 也复用
+  const finishScan = (raw: ClaudeSkill[]): ClaudeSkill[] => {
+    // 去重：同一 skillDir 可能因目录重复配置被扫描多次，导致 ListItem id 重复（Raycast 会报错）
+    const seenSkillDirs = new Set<string>();
+    const uniqueSkills = raw.filter((skill) => {
+      if (seenSkillDirs.has(skill.skillDir)) return false;
+      seenSkillDirs.add(skill.skillDir);
+      return true;
+    });
+
+    // 应用元数据（复用现有逻辑）
+    const skillsWithMetadata = applyMetadataToSkills(uniqueSkills);
+
+    // 读取统计数据（带缓存）
+    const stats = readStats();
+    const logCounts = countExecutionsFromLog();
+
+    // 添加使用次数（取 stats.json 和 JSONL 日志中的较大值）
+    const skillsWithExecutions = skillsWithMetadata.map((skill) => ({
+      ...skill,
+      executions: Math.max(
+        stats.commands[skill.name]?.totalExecutions || 0,
+        logCounts[skill.name] || 0,
+      ),
+    }));
+
+    // 排序：pinned > isNew > 使用频次 > 名称
+    const sorted = skillsWithExecutions.sort((a, b) => {
+      // 1. pinned 优先
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
+
+      // 2. isNew 其次
+      if (a.isNew && !b.isNew) return -1;
+      if (!a.isNew && b.isNew) return 1;
+
+      // 3. 使用频次（高频在前）
+      if (a.executions !== b.executions)
+        return (b.executions || 0) - (a.executions || 0);
+
+      // 4. 名称字母序
+      return a.name.localeCompare(b.name);
+    });
+
+    skillsCache = sorted;
+    skillsCacheTime = Date.now();
+    skillsCacheKey = cacheKey;
+    return sorted;
+  };
+
+  // ── Profile 独占模式（Hermes 后端 + 选定 profile）─────────────────────
+  // 语义：只读该 profile 的 skills/<分类>/，其他一切来源（项目目录、
+  // ~/.claude/skills、主 ~/.hermes/skills）全部不读。profile 是隔离岛。
+  if (backend === "hermes" && hermesProfileHome) {
+    const hermesSkillsRoot = join(hermesProfileHome, "skills");
+    if (existsSync(hermesSkillsRoot) && isValidSkillsDir(hermesSkillsRoot)) {
+      for (const entry of readdirSync(hermesSkillsRoot, { withFileTypes: true })) {
+        if (entry.isDirectory() || entry.isSymbolicLink()) {
+          const catDir = join(hermesSkillsRoot, entry.name);
+          if (isValidSkillsDir(catDir)) {
+            const skills = scanSkillsDirectory(
+              catDir,
+              hermesProfileHome,
+              `Hermes · ${basename(hermesProfileHome)} · ${entry.name}`,
+            );
+            allSkills.push(...skills);
+          }
+        }
+      }
+    }
+    return finishScan(allSkills);
+  }
+
+  // ── 常规模式 ─────────────────────────────────────────────────────────
   for (const dir of projectDirs) {
     const skills = scanSingleProjectSkills(dir, backend);
     allSkills.push(...skills);
@@ -199,8 +273,7 @@ export function scanSkills(
   const defaultExecutionProjectDir = projectDirs[0];
   if (defaultExecutionProjectDir) {
     // standaloneSkillsDirs（默认 ~/.claude/skills）只在 Claude/CodeBuddy 后端扫描。
-    // Hermes 后端跳过：Hermes 不读该目录，扫了只会混入 Claude 全局技能，
-    // 且让 profile 隔离失效（26 个 Claude 技能永远出现在列表里）。
+    // Hermes 后端跳过：Hermes 不读该目录，扫了只会混入 Claude 全局技能。
     if (backend !== "hermes") {
       for (const dir of standaloneSkillsDirs) {
         const skills = scanSkillsDirectory(
@@ -211,19 +284,10 @@ export function scanSkills(
         allSkills.push(...skills);
       }
     }
-    // Hermes 后端：扫描用户级 skills。
-    // - profile 模式（hermesProfileHome 给了值）：扫 ~/.hermes/profiles/<name>/skills/<分类>/（隔离岛）
-    // - 主 Hermes 模式（hermesProfileHome 空）：扫 ~/.hermes/skills/<分类>/<技能>/（深一层分类目录）
-    // Hermes 的 chat -s 预加载从这个索引解析技能名；不扫这里则 Hermes 后端永远 Unknown skill。
+    // Hermes 后端（未选 profile）：扫主 ~/.hermes/skills/<分类>/<技能>/
     if (backend === "hermes") {
-      const hermesSkillsRoot = hermesProfileHome
-        ? join(hermesProfileHome, "skills")
-        : join(homedir(), ".hermes/skills");
-      const rootLabel = hermesProfileHome
-        ? `Hermes · ${basename(hermesProfileHome)}`
-        : "Hermes";
+      const hermesSkillsRoot = join(homedir(), ".hermes/skills");
       if (existsSync(hermesSkillsRoot) && isValidSkillsDir(hermesSkillsRoot)) {
-        // 分类目录展开：每个分类子目录都是一个 skills 目录
         for (const entry of readdirSync(hermesSkillsRoot, { withFileTypes: true })) {
           if (entry.isDirectory() || entry.isSymbolicLink()) {
             const catDir = join(hermesSkillsRoot, entry.name);
@@ -231,7 +295,7 @@ export function scanSkills(
               const skills = scanSkillsDirectory(
                 catDir,
                 defaultExecutionProjectDir,
-                `${rootLabel} · ${entry.name}`,
+                `Hermes · ${entry.name}`,
               );
               allSkills.push(...skills);
             }
@@ -241,52 +305,7 @@ export function scanSkills(
     }
   }
 
-  // 去重：同一 skillDir 可能因目录重复配置被扫描多次，导致 ListItem id 重复（Raycast 会报错）
-  const seenSkillDirs = new Set<string>();
-  const uniqueSkills = allSkills.filter((skill) => {
-    if (seenSkillDirs.has(skill.skillDir)) return false;
-    seenSkillDirs.add(skill.skillDir);
-    return true;
-  });
-
-  // 应用元数据（复用现有逻辑）
-  const skillsWithMetadata = applyMetadataToSkills(uniqueSkills);
-
-  // 读取统计数据（带缓存）
-  const stats = readStats();
-  const logCounts = countExecutionsFromLog();
-
-  // 添加使用次数（取 stats.json 和 JSONL 日志中的较大值）
-  const skillsWithExecutions = skillsWithMetadata.map((skill) => ({
-    ...skill,
-    executions: Math.max(
-      stats.commands[skill.name]?.totalExecutions || 0,
-      logCounts[skill.name] || 0,
-    ),
-  }));
-
-  // 排序：pinned > isNew > 使用频次 > 名称
-  const sorted = skillsWithExecutions.sort((a, b) => {
-    // 1. pinned 优先
-    if (a.pinned && !b.pinned) return -1;
-    if (!a.pinned && b.pinned) return 1;
-
-    // 2. isNew 其次
-    if (a.isNew && !b.isNew) return -1;
-    if (!a.isNew && b.isNew) return 1;
-
-    // 3. 使用频次（高频在前）
-    if (a.executions !== b.executions)
-      return (b.executions || 0) - (a.executions || 0);
-
-    // 4. 名称字母序
-    return a.name.localeCompare(b.name);
-  });
-
-  skillsCache = sorted;
-  skillsCacheTime = Date.now();
-  skillsCacheKey = cacheKey;
-  return sorted;
+  return finishScan(allSkills);
 }
 
 export function invalidateSkillsCache(): void {
