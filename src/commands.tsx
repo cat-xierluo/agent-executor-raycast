@@ -29,6 +29,8 @@ import { scanSkills, ClaudeSkill, readSkillContent } from "./utils/skills";
 import {
   getSelectedHermesProfile,
   getSelectedHermesProfileSync,
+  getSelectedBackendSync,
+  writeSelectedBackendSync,
   resolveProfileHome,
 } from "./utils/hermesProfile";
 import { readFileSync } from "fs";
@@ -112,14 +114,27 @@ export default function CommandList(
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [streamingCommand, setStreamingCommand] = useState<string | null>(null);
 
-  // 执行后端选择（默认取全局偏好，可在 UI 中临时切换）
+  // 执行后端选择：优先恢复上次选择（~/.hermes/active-backend 快路径，Cmd+Shift+B
+  // 轮换时双写），无记录时回落偏好默认。重开命令不再意外回到 claude。
   const [selectedBackend, setSelectedBackend] = useState<AgentBackend>(() => {
+    const persisted = getSelectedBackendSync();
+    if (persisted) return persisted;
     try {
       return getConfig().backend;
     } catch {
       return "claude";
     }
   });
+
+  // 轮换 + 持久化（内存态即时生效，文件让下次重开保持）
+  function rotateBackend() {
+    setSelectedBackend((b) => {
+      const next: AgentBackend =
+        b === "claude" ? "codebuddy" : b === "codebuddy" ? "hermes" : "claude";
+      writeSelectedBackendSync(next);
+      return next;
+    });
+  }
 
   // Hermes profile 选择（「选择 Hermes Profile」命令写入 ~/.hermes/active-profile
   // + LocalStorage 双写；读取走同步文件快路径——LocalStorage IPC 桥冷启动秒级，
@@ -138,15 +153,7 @@ export default function CommandList(
   const backendToggleAction = (
     <Action
       title={`执行后端：${selectedBackend === "codebuddy" ? "CodeBuddy" : selectedBackend === "hermes" ? "Hermes" : "Claude Code"}`}
-      onAction={() =>
-        setSelectedBackend((b) =>
-          b === "claude"
-            ? "codebuddy"
-            : b === "codebuddy"
-              ? "hermes"
-              : "claude",
-        )
-      }
+      onAction={rotateBackend}
       icon={Icon.Switch}
       shortcut={{ modifiers: ["cmd", "shift"], key: "b" }}
     />

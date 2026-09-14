@@ -24,6 +24,33 @@ export function getSelectedHermesProfileSync(): string {
   }
 }
 
+/**
+ * 执行后端选择的同步快路径：~/.hermes/active-backend（纯文本一行：
+ * claude | codebuddy | hermes）。与 active-profile 同理——selectedBackend
+ * 决定首扫路径，重开命令必须恢复上次选择而不是回落偏好默认。
+ */
+const ACTIVE_BACKEND_FILE = join(homedir(), ".hermes", "active-backend");
+
+export type PersistableBackend = "claude" | "codebuddy" | "hermes";
+
+export function getSelectedBackendSync(): PersistableBackend | undefined {
+  try {
+    if (!existsSync(ACTIVE_BACKEND_FILE)) return undefined;
+    const v = readFileSync(ACTIVE_BACKEND_FILE, "utf-8").trim();
+    return v === "claude" || v === "codebuddy" || v === "hermes" ? v : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function writeSelectedBackendSync(backend: PersistableBackend): void {
+  try {
+    writeFileSync(ACTIVE_BACKEND_FILE, backend, "utf-8");
+  } catch {
+    // 写失败不致命：本次会话内存态仍生效，只是重开回落偏好默认
+  }
+}
+
 /** 双写：快路径文件 + LocalStorage（兼容旧读取路径）。 */
 async function writeSelectedHermesProfile(name: string): Promise<void> {
   try {
