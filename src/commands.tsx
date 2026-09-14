@@ -126,6 +126,9 @@ export default function CommandList(
     string | undefined
   >(undefined);
   const [profileLabel, setProfileLabel] = useState<string>("主 Hermes");
+  // profile 选择是否已从 LocalStorage 读出。读出前 loadSkills 跳过（Hermes 后端时），
+  // 避免"先扫主 Hermes 再扫 profile"的双重加载时序。
+  const [profileReady, setProfileReady] = useState<boolean>(false);
 
   // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy / Hermes 间轮换）
   const backendToggleAction = (
@@ -220,7 +223,9 @@ export default function CommandList(
     };
   }, []);
 
-  // 初始化 Hermes profile 选择：异步读 LocalStorage，随后按选中 profile 重扫 skills
+  // 初始化 Hermes profile 选择：异步读 LocalStorage，随后按选中 profile 重扫 skills。
+  // 无论是否选中 profile 都必须 setProfileReady(true) 并触发首扫——这是首扫的唯一入口
+  //（mount 时的 loadSkills 被 profileReady 门挡住）。
   useEffect(() => {
     (async () => {
       try {
@@ -230,13 +235,18 @@ export default function CommandList(
           if (home) {
             setActiveProfileHome(home);
             setProfileLabel(name);
-            loadSkillsRef.current();
+          } else {
+            // 选中但目录已不存在 → 回退主 Hermes
+            setProfileLabel("主 Hermes");
           }
         } else {
           setProfileLabel("主 Hermes");
         }
       } catch {
         // LocalStorage 读取失败 = 主 Hermes，不打扰用户
+      } finally {
+        setProfileReady(true);
+        loadSkillsRef.current();
       }
     })();
   }, []);
@@ -317,6 +327,12 @@ export default function CommandList(
 
   async function loadSkills() {
     try {
+      // 时序门：Hermes 后端时，profile 选择未从 LocalStorage 读出前不扫。
+      // 否则首次挂载会先按"无 profile"扫主 Hermes，profile 读出后再扫一遍 profile，
+      // 用户看到"先加载主 Agent 的 skill 再加载 profile 的 skill"双重加载。
+      if (selectedBackend === "hermes" && !profileReady) {
+        return;
+      }
       const config = getConfig();
       // 传当前后端：Hermes 时按 .hermes/.agents + Hermes skills 布局扫描
       // hermesProfileHome 给定时扫 profile 的 skills/（隔离岛），空时扫主 ~/.hermes/skills/
