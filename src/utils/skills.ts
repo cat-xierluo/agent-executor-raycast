@@ -198,13 +198,18 @@ export function scanSkills(
 
   const defaultExecutionProjectDir = projectDirs[0];
   if (defaultExecutionProjectDir) {
-    for (const dir of standaloneSkillsDirs) {
-      const skills = scanSkillsDirectory(
-        dir,
-        defaultExecutionProjectDir,
-        "默认 Skills",
-      );
-      allSkills.push(...skills);
+    // standaloneSkillsDirs（默认 ~/.claude/skills）只在 Claude/CodeBuddy 后端扫描。
+    // Hermes 后端跳过：Hermes 不读该目录，扫了只会混入 Claude 全局技能，
+    // 且让 profile 隔离失效（26 个 Claude 技能永远出现在列表里）。
+    if (backend !== "hermes") {
+      for (const dir of standaloneSkillsDirs) {
+        const skills = scanSkillsDirectory(
+          dir,
+          defaultExecutionProjectDir,
+          "默认 Skills",
+        );
+        allSkills.push(...skills);
+      }
     }
     // Hermes 后端：扫描用户级 skills。
     // - profile 模式（hermesProfileHome 给了值）：扫 ~/.hermes/profiles/<name>/skills/<分类>/（隔离岛）
