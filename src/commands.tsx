@@ -303,8 +303,8 @@ export default function CommandList(
       logger.logCompleted(
         result.output,
         result.exitCode,
-        undefined,
-        undefined,
+        result.pid,
+        result.sessionId,
         result.apiSuccess,
       );
       recordExecution(task.skillName, result.success, Date.now() - startTime);
@@ -667,8 +667,8 @@ export default function CommandList(
         logger.logCompleted(
           result.output,
           result.exitCode,
-          undefined,
-          undefined,
+          result.pid,
+          result.sessionId,
           result.apiSuccess,
         );
         if (result.pid) activePids.current["free-command"] = result.pid;
@@ -955,8 +955,8 @@ export default function CommandList(
         logger.logCompleted(
           result.output,
           result.exitCode,
-          undefined,
-          undefined,
+          result.pid,
+          result.sessionId,
           result.apiSuccess,
         );
         if (result.pid) activePids.current[skill.name] = result.pid;

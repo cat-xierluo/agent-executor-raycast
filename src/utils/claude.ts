@@ -263,10 +263,17 @@ export function buildHermesArgs(
   prompt: string,
   workDir: string,
   skillContent?: string,
+  headlessPreamble?: string,
 ): string[] {
   let query = prompt;
   if (skillContent && skillContent.trim()) {
     query = `${skillContent.trim()}\n\n---\n\n# 任务\n${prompt}`;
+  }
+  // Hermes 无 --append-system-prompt；无头前置指令（不提问/产出 YYMMDD 命名等，
+  // 见 resolveHeadlessPreamble）只能嵌入 query 头部，否则 Hermes 后端丢失整套
+  // 执行规范（曾导致产出文件不带 YYMMDD 前缀）。
+  if (headlessPreamble && headlessPreamble.trim()) {
+    query = `${headlessPreamble.trim()}\n\n---\n\n${query}`;
   }
   return [
     "chat",
@@ -275,6 +282,13 @@ export function buildHermesArgs(
     "--oneshot",
     "-Q",
     "--pass-session-id",
+    // 显式 source 标签：Hermes 自 2026-09-16（ae1b5d79）起把 oneshot 会话记为
+    // source=oneshot 并从桌面端/CLI 会话列表隐藏（INTERNAL_LISTING_SOURCES 黑名单）。
+    // 显式 --source 会设置 HERMES_SESSION_SOURCE_EXPLICIT=1，绕过 oneshot 改写
+    // （run_agent._session_source_for_agent），会话保持可见可回看。cli 是"人类发起"
+    // 语义最贴近的标签。
+    "--source",
+    "cli",
     "--in",
     workDir,
   ];
@@ -543,8 +557,9 @@ export async function executeClaudeStreaming(
     // Hermes 后端：独立的 chat 参数体系（无 --output-format stream-json），
     // 逐行直传 stdout 作为流式块，结束时用 parseHermesOutput 提取正文与 session_id
     const isHermes = backend === "hermes";
+    const streamPreamble = resolveHeadlessPreamble();
     const streamArgs = isHermes
-      ? buildHermesArgs(prompt, projectDir, skillContent)
+      ? buildHermesArgs(prompt, projectDir, skillContent, streamPreamble)
       : [
           "-p",
           prompt,
@@ -553,8 +568,7 @@ export async function executeClaudeStreaming(
           "--verbose",
           "--include-partial-messages",
         ];
-    const streamPreamble = isHermes ? "" : resolveHeadlessPreamble();
-    if (streamPreamble) {
+    if (streamPreamble && !isHermes) {
       streamArgs.push("--append-system-prompt", streamPreamble);
     }
     const child = spawn(claudeBin, streamArgs, {
@@ -802,29 +816,40 @@ export async function executeClaudeCommand(
         // 使用 base64 编码传递 prompt，避免 shell 注入
         const promptB64 = Buffer.from(prompt).toString("base64");
 
+        // Hermes 后端：无 --print/--output-format，走 chat -q 参数体系；
+        // 可视化模式用户在场，不嵌 skill 正文与无头前置指令，靠 TTY 交互。
+        // --source cli 让会话在桌面端可见（Hermes 默认把 oneshot 会话隐藏）。
+        const isHermes = backend === "hermes";
+        const runCmd = isHermes
+          ? `"${claudeBin}" chat -q "$PROMPT" --source cli`
+          : `"${claudeBin}" --print --dangerously-skip-permissions --output-format json "$PROMPT"`;
+
         const scriptContent = `#!/bin/bash
 cd "${projectDir}"
 PROMPT=$(echo '${promptB64}' | base64 -d)
-echo "=== 执行 Claude Code 命令 ==="
+echo "=== 执行命令 ==="
 echo "命令: $PROMPT"
 echo ""
 
-# 使用 JSON 输出格式以捕获 session ID
-"${claudeBin}" --print --dangerously-skip-permissions --output-format json "$PROMPT" > "${sessionFile}"
+${runCmd} > "${sessionFile}" 2>&1
+EXIT_CODE=$?
 
 # 提取并显示结果和 session ID
 if [ -f "${sessionFile}" ]; then
-  # 提取 session_id
+  # 提取 session_id（Claude JSON 格式或 Hermes 纯文本 session_id: 行）
   SESSION_ID=$(cat "${sessionFile}" | grep -o '"session_id":"[^"]*"' | cut -d'"' -f4)
+  if [ -z "$SESSION_ID" ]; then
+    SESSION_ID=$(cat "${sessionFile}" | grep -o 'session_id: [^[:space:]]*' | cut -d' ' -f2)
+  fi
 
   # 提取并显示结果
   cat "${sessionFile}" | grep -o '"result":"[^"]*"' | sed 's/"result":"//' | sed 's/"$//' | sed 's/\\\\n/\\n/g'
 
   echo ""
-  echo "=== 执行完成 ==="
+  echo "=== 执行完成 (exit $EXIT_CODE) ==="
   echo "Session ID: $SESSION_ID"
   echo ""
-  echo "恢复此对话: claude --resume $SESSION_ID"
+  echo "恢复此对话: ${isHermes ? "hermes chat -r" : "claude --resume"} $SESSION_ID"
   echo "你可以查看上方输出，手动关闭此窗口。"
 
   # 清理临时文件
@@ -908,8 +933,9 @@ end tell`;
       // 进程异常退出时 stdout 为空导致结果/ session 全部丢失（Claude 与 CodeBuddy 都出现过）。
       // Hermes 后端：chat 子命令参数体系，无 stream-json，close 时用 parseHermesOutput 解析。
       const isHermes = backend === "hermes";
+      const printPreamble = resolveHeadlessPreamble();
       const printArgs = isHermes
-        ? buildHermesArgs(prompt, projectDir, skillContent)
+        ? buildHermesArgs(prompt, projectDir, skillContent, printPreamble)
         : [
             "--print",
             "--dangerously-skip-permissions",
@@ -918,8 +944,7 @@ end tell`;
             "--verbose",
             prompt,
           ];
-      const printPreamble = isHermes ? "" : resolveHeadlessPreamble();
-      if (printPreamble) {
+      if (printPreamble && !isHermes) {
         printArgs.push("--append-system-prompt", printPreamble);
       }
       const child = spawn(claudeBin, printArgs, {
