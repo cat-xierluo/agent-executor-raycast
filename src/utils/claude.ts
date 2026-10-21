@@ -1,5 +1,5 @@
 import { spawn, execSync } from "child_process";
-import { join } from "path";
+import { basename, dirname, join } from "path";
 import { homedir, tmpdir } from "os";
 import {
   readFileSync,
@@ -10,6 +10,8 @@ import {
   readdirSync,
 } from "fs";
 import { getPreferenceValues } from "@raycast/api";
+import { canPreloadHermesSkill } from "./hermesSkills";
+import { normalizeHermesModel } from "./hermesModel";
 
 /** 执行后端：Claude Code、CodeBuddy（CLI 兼容）或 Hermes（独立参数体系） */
 export type AgentBackend = "claude" | "codebuddy" | "hermes";
@@ -253,20 +255,24 @@ export function parseHermesOutput(stdout: string): {
  * - --oneshot + -Q：程序化单次执行，只输出最终回复
  * - --pass-session-id：输出 session_id 行，供恢复对话
  * - --in 指定工作目录：Hermes 按自身规则发现 .hermes/skills、.agents/skills
- *
- * 不用 `-s` 预加载：Hermes 的技能索引只覆盖自己的目录体系（~/.hermes/skills/<分类>/<技能>、
- * 项目 .hermes/skills、.agents/skills），不扫 Claude 布局的 .claude/skills——Raycast 扫出的
- * 技能名传 `-s` 会得到 "Unknown skill(s)" 退出码 1（实测）。因此由调用方把 SKILL.md 全文
- * 读出后作为 skillContent 传入，直接嵌入 query，语义与 Claude Code 的 Skill 工具注入对齐。
+ * - preloadSkillName：可寻址时走 -s 原生预加载（技能正文由 Hermes 写进
+ *   system prompt，自带目录/支撑文件清单），见 resolveHermesPreload；
+ *   不可寻址（不在 Hermes 索引/同名多份/截断行）回退 skillContent 全文嵌入
+ * - model：显式模型（provider/model），经 hermesModel.ts 白名单校验；
+ *   空则跟随 config.yaml 的 model.default
  */
 export function buildHermesArgs(
   prompt: string,
   workDir: string,
   skillContent?: string,
   headlessPreamble?: string,
+  preloadSkillName?: string,
+  model?: string,
 ): string[] {
   let query = prompt;
-  if (skillContent && skillContent.trim()) {
+  // preloadSkillName 走 Hermes 原生预加载：技能正文由 Hermes 写进 system prompt
+  // （自带目录/支撑文件清单/config），调用方不再嵌入全文，两者互斥。
+  if (!preloadSkillName && skillContent && skillContent.trim()) {
     query = `${skillContent.trim()}\n\n---\n\n# 任务\n${prompt}`;
   }
   // Hermes 无 --append-system-prompt；无头前置指令（不提问/产出 YYMMDD 命名等，
@@ -291,6 +297,12 @@ export function buildHermesArgs(
     "cli",
     "--in",
     workDir,
+    // 预加载技能（-s）：Hermes 解析该名字后把技能写进 system prompt。
+    // 必须在 spawn 前决定好——跑失败再回退会二次 spawn，写出两条 executing 事件。
+    ...(preloadSkillName ? ["-s", preloadSkillName] : []),
+    // 显式模型（-m provider/model）：空 = 跟随 config.yaml 的 model.default。
+    // provider/model 形态见 hermes chat --help 示例（anthropic/claude-sonnet-4）。
+    ...(model ? ["-m", model] : []),
   ];
 }
 
@@ -307,7 +319,11 @@ export function parsePrintOutput(stdout: string): {
   isError?: boolean;
 } {
   // 1) stream-json 逐行（Claude 与 CodeBuddy 可靠输出路径），取最后一个 result 行
-  let lastStreamResult: { result?: unknown; sessionId?: string; isError?: boolean } | null = null;
+  let lastStreamResult: {
+    result?: unknown;
+    sessionId?: string;
+    isError?: boolean;
+  } | null = null;
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
     if (!trimmed.startsWith("{")) continue;
@@ -362,8 +378,10 @@ export interface ClaudeExecutionOptions {
   codebuddyBin?: string;
   hermesBin?: string;
   hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
+  hermesModel?: string; // Hermes 后端：显式模型（provider/model）；空 = 跟随 config.yaml 默认
   backend?: AgentBackend;
   skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
+  skillFile?: string; // Hermes 后端：技能定义文件；用于判断能否改走 -s 原生预加载
   headlessMode?: boolean;
   onPid?: (pid: number) => void;
 }
@@ -395,8 +413,10 @@ export interface ClaudeStreamingOptions {
   codebuddyBin?: string;
   hermesBin?: string;
   hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
+  hermesModel?: string; // Hermes 后端：显式模型（provider/model）；空 = 跟随 config.yaml 默认
   backend?: AgentBackend;
   skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
+  skillFile?: string; // Hermes 后端：技能定义文件；用于判断能否改走 -s 原生预加载
   headlessMode?: boolean;
   onPid?: (pid: number) => void;
   onChunk?: StreamingCallback; // 流式输出回调
@@ -474,18 +494,45 @@ function getProjectEnv(
 }
 
 /**
- * 无头模式默认前置系统指令。
- * 在后台（无头）启动时注入，压制不必要的提问/确认，并预设外传授权与输出规范。
+ * 决定 Hermes 后端用哪种方式投喂技能，返回 -s 预加载的技能名；不可寻址时返回 undefined（回退嵌入全文）。
+ * 必须在 spawn 之前调用完毕：跑失败再回退会二次 spawn，写出两条 executing 事件，
+ * 既污染刚修好的执行次数统计，也会让 PID 侦测拿旧进程误判成新任务。
+ */
+async function resolveHermesPreload(options: {
+  backend?: AgentBackend;
+  skillFile?: string;
+  hermesBin: string;
+  projectDir: string;
+  hermesProfileHome?: string;
+}): Promise<string | undefined> {
+  const { backend, skillFile, hermesBin, projectDir, hermesProfileHome } =
+    options;
+  if (backend !== "hermes" || !skillFile) return undefined;
+
+  try {
+    const ok = await canPreloadHermesSkill({
+      skillFile,
+      hermesBin,
+      projectDir,
+      hermesProfileHome,
+    });
+    return ok ? basename(dirname(skillFile)) : undefined;
+  } catch {
+    // 探测异常一律回退嵌入，不影响任务执行
+    return undefined;
+  }
+}
+
+/**
+ * 无头模式默认前置指令。
+ * 在后台（无头）启动时注入。设计目标只有一个：让 Agent 一次把任务跑完（用户不盯运行过程），
+ * 因此保持精简——只交代无人值守事实、默认值策略、外传授权与输出命名，不做长篇铺陈。
  * 用户可在 Raycast 偏好"无头模式前置指令"中整体覆盖；留空时使用本默认值。
  */
-const DEFAULT_HEADLESS_PREAMBLE = `# 执行模式（最高优先级，覆盖各 skill 正文的冲突说明）
-本会话由 Raycast 无头模式自动启动，用户不在线，无法回复任何提问。
-1. 不向用户提问、不征求选择、不要求确认；遇到需要决策的情况，选择最合理默认值并继续执行。
-2. 任何需要上传或外传的已配置后端/服务（包括但不限于 PaddleOCR、MinerU 等云端 OCR 及其他联网 API）默认视为已获用户授权，直接使用；仅当用户本次留言明确要求保密/本地/离线时才改用纯本地方案。
-3. 本指令优先级高于任何 skill 正文中"先询问用户/等待确认/取得授权后再继续"的说明。
-4. CLI 命令产生的命名产出写入输入文件所在目录，文件名格式：YYMMDD 原名.扩展名。
-5. 仅当遇到真正无法自行决定、且不处理就无法继续的阻塞时才停下，并说明阻塞点和建议的默认值。
-完成后直接给出结果：做了什么、输出文件、验证情况、遗留风险。不要罗列选项让用户选。`;
+const DEFAULT_HEADLESS_PREAMBLE = `# Raycast 后台无人值守执行
+用户不盯着这次运行，请一次把任务完整跑完：不提问、不等确认，需要选择就取最合理默认值并在结尾注明假设；只有不处理就无法继续时才停。没有可交互的终端，不要运行等待键盘输入的命令。技能正文里「先询问 / 等待确认」的步骤同样直接处理。
+已配置的外部服务（云端 OCR、联网 API 等）默认已授权，直接使用；用户本次留言要求保密 / 本地时改用本地方案。删除、覆盖原文件等不可逆操作默认写新文件代替，仅留言明确要求时执行。
+命名产出写入输入文件所在目录，文件名「YYMMDD 原名.扩展名」（取今天）。结束时直接汇报：做了什么、输出文件、验证情况、遗留风险。`;
 
 /**
  * 解析无头模式前置指令：优先用 Raycast 偏好的自定义内容，否则用内置默认。
@@ -518,6 +565,10 @@ export async function executeClaudeStreaming(
     onChunk,
     logger,
   } = options;
+  // 消费点统一过白名单：排队回放（task-queue.json）等旁路入口的值不经
+  // hermesModel.ts 读入口，这里兜底校验——可视化终端分支会把它插进 bash 脚本字符串
+  const hermesModel =
+    normalizeHermesModel(options.hermesModel ?? "") || undefined;
   const claudeBin = resolveBackendBin(
     backend,
     customClaudeBin,
@@ -546,6 +597,15 @@ export async function executeClaudeStreaming(
   // 启动实时日志流
   logger?.startRealtimeLogging();
 
+  // spawn 前定好技能投喂方式（Promise 执行器里不能用 await）
+  const streamPreload = await resolveHermesPreload({
+    backend,
+    skillFile: options.skillFile,
+    hermesBin: claudeBin,
+    projectDir,
+    hermesProfileHome,
+  });
+
   return new Promise((resolve) => {
     let fullOutput = "";
     let sessionId: string | undefined;
@@ -559,7 +619,14 @@ export async function executeClaudeStreaming(
     const isHermes = backend === "hermes";
     const streamPreamble = resolveHeadlessPreamble();
     const streamArgs = isHermes
-      ? buildHermesArgs(prompt, projectDir, skillContent, streamPreamble)
+      ? buildHermesArgs(
+          prompt,
+          projectDir,
+          skillContent,
+          streamPreamble,
+          streamPreload,
+          hermesModel,
+        )
       : [
           "-p",
           prompt,
@@ -790,6 +857,9 @@ export async function executeClaudeCommand(
     headlessMode = true,
     onPid,
   } = options;
+  // 同 executeClaudeStreaming：消费点白名单兜底（排队回放旁路入口）
+  const hermesModel =
+    normalizeHermesModel(options.hermesModel ?? "") || undefined;
   const claudeBin = resolveBackendBin(
     backend,
     customClaudeBin,
@@ -819,9 +889,11 @@ export async function executeClaudeCommand(
         // Hermes 后端：无 --print/--output-format，走 chat -q 参数体系；
         // 可视化模式用户在场，不嵌 skill 正文与无头前置指令，靠 TTY 交互。
         // --source cli 让会话在桌面端可见（Hermes 默认把 oneshot 会话隐藏）。
+        // -m 双引号包裹防方括号通配（zai_glm-5.3-flash[1M]）；值本身已在
+        // hermesModel.ts 白名单校验（无引号/$/反引号等可注入字符），双保险。
         const isHermes = backend === "hermes";
         const runCmd = isHermes
-          ? `"${claudeBin}" chat -q "$PROMPT" --source cli`
+          ? `"${claudeBin}" chat -q "$PROMPT" --source cli${hermesModel ? ` -m "${hermesModel}"` : ""}`
           : `"${claudeBin}" --print --dangerously-skip-permissions --output-format json "$PROMPT"`;
 
         const scriptContent = `#!/bin/bash
@@ -923,6 +995,15 @@ end tell`;
     logger.startRealtimeLogging();
   }
 
+  // spawn 前定好技能投喂方式（Promise 执行器里不能用 await）
+  const printPreload = await resolveHermesPreload({
+    backend,
+    skillFile: options.skillFile,
+    hermesBin: claudeBin,
+    projectDir,
+    hermesProfileHome,
+  });
+
   return new Promise((resolve) => {
     let pid: number | undefined;
 
@@ -935,7 +1016,14 @@ end tell`;
       const isHermes = backend === "hermes";
       const printPreamble = resolveHeadlessPreamble();
       const printArgs = isHermes
-        ? buildHermesArgs(prompt, projectDir, skillContent, printPreamble)
+        ? buildHermesArgs(
+            prompt,
+            projectDir,
+            skillContent,
+            printPreamble,
+            printPreload,
+            hermesModel,
+          )
         : [
             "--print",
             "--dangerously-skip-permissions",
@@ -1022,10 +1110,7 @@ end tell`;
 
             // 统一解析 stdout（Claude 单对象 / CodeBuddy 数组或 stream-json 行）
             const parsedOut = parsePrintOutput(stdout);
-            if (
-              typeof parsedOut.result === "string" &&
-              parsedOut.result
-            ) {
+            if (typeof parsedOut.result === "string" && parsedOut.result) {
               output = parsedOut.result;
             } else {
               // 没有可用 result 字段，使用原始输出（可能是错误信息）

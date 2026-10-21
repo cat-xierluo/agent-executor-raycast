@@ -6,6 +6,12 @@
 
 ### 新增 (Added)
 
+- **Hermes 模型选择（主界面常驻下拉）**：主列表搜索栏右下角新增 `List.Dropdown` 模型选择器，选定后所有执行路径（技能、带 URL/备注、自由指令、排队任务、可视化终端）在后台自动以 `-m provider/model` 传给 Hermes，无需任何手动输入。
+  - 新增 `src/utils/hermesModel.ts`：解析 `config.yaml` 得到 `model.default` + 各 provider 模型清单；合并语义按 Hermes 真实解析校准（2026-10-21 实测）：profile 自带 `providers` 段时以其为权威清单（HERMES_HOME 指向 profile 后 Hermes 不读主配置），profile 未定义时退回主配置；`model.default` 始终主配置打底、profile 覆盖。选择持久化走 `~/.hermes/active-model` 文件 + LocalStorage 双写（与 active-profile/active-backend 同款快路径，重开命令回显秒开、跨会话记忆）。
+  - 清单动态生效：profile 的 config.yaml 增删模型后，重开命令或 `Cmd+R` 刷新列表即重读（刷新动作与技能扫描同源刷新 catalog）。
+  - `buildHermesArgs()` 新增 `model` 参数追加 `-m`；`ClaudeExecutionOptions`/`ClaudeStreamingOptions` 新增 `hermesModel`，两处 spawn 点与可视化终端 shell 分支全部透传；`QueuedTask` 增加 `hermesModel`，排队回放不丢选择。
+  - review 修正：模型选择值读入/转换处经白名单校验（`provider/model` 字符集，杜绝引号/`$`/反引号等字符进入可视化终端的 bash 脚本字符串）；`package-lock.json` 同步 `yaml` 依赖（`npm ci` 干净安装可通过）。
+  - 下拉首项「默认（glm-5.3 @ zai）」= 不传 `-m` 跟随 Hermes 配置；清单跟随当前 profile 切换自动刷新；已选模型不在当前 profile 清单时保留回显并照传（标注「当前 profile 未提供」），由 Hermes 报错可见而非静默清空。仅影响 Hermes 后端，claude/codebuddy 无感。
 - **Hermes Profile 动态选择器**：新增「选择 Hermes Profile」命令（select-profile），动态扫描 `~/.hermes/profiles/` 列出所有 profile（含 description 与 skill 数），回车即切换；LocalStorage 持久化，后续新增 bot（新建 profile 目录）自动出现在列表中，无需改代码。
   - 主界面 ActionPanel 新增「Hermes Profile：当前值」指示（`Cmd+Shift+P` 跳转选择器）；当前选中的 profile 显示 ✓。
   - `commands.tsx` 组件层新增 `activeProfileHome` 状态：异步读 LocalStorage 后**覆盖 textfield 偏好**，7 处执行/扫描路径统一生效；清空选择即回主 Hermes。
@@ -24,6 +30,14 @@
 
 ### 改进 (Improved)
 
+- **`code-video` 装进 Hermes profile**：`code-video` 原是 `private-skills` 下的同级目录、没有软链进任何 profile，Raycast 扫得到但 Hermes `-s` 永远取不到，code-livephoto 的方法依赖只能靠正文里 `../code-video/` 相对路径兜。已软链到 `~/.hermes/profiles/info-assistant/skills/code-video`，`-s code-video` 实测解析成功。
+  - 前置修复：该技能的 `SKILL.md` 曾被误删（工作区呈 `D` 状态，HEAD 中完好），已 `git checkout` 还原并校验 sha256 与 `e3c2fb8ee` 一致。
+  - 连带清理：`archive/261016_CLC-040-C波/skills-{old,new}/code-video` 是指向活动目录的**软链**而非冻结副本，Hermes 的 `os.walk(followlinks=True)` 会把它们当独立技能收进来，造成 3 份同名 code-video。两个软链已删除（只删链接，目标目录未动）。复扫：60 技能、零同名冲突、archive 内零残留。
+- **Hermes 后端改用 `-s` 原生预加载技能（可寻址时），否则回退全文嵌入**：无头路径 `-q --oneshot` 下 Hermes 不展开 `/skill` 斜杠命令，扩展历来把 SKILL.md 全文嵌进 query。但 Hermes 另有无头可用的原生方式 `-s <name>`：它按自身索引解析名字、把技能写进 system prompt，并附带技能目录、`references/ scripts/` 支撑文件清单与 `config.yaml` 解析值——比裸嵌全文完整（裸嵌版连目录都没告诉模型）。
+  - 新增 `src/utils/hermesSkills.ts`：`canPreloadHermesSkill()` 解析 `hermes skills list` 判断名字能否被 Hermes **唯一**解析。表格名字列会被截断成 `…`，这类行不算精确匹配；若截断行的可见前缀与查询名相同（历史快照导致的同名多份），保守判为不可寻址。探测结果按 (hermesBin, projectDir, HERMES_HOME) 缓存 10 分钟；探测失败不缓存，避免把一次失败固化成十分钟的「回退嵌入」。`hermes skills inspect` 不可用——它查注册表而非本地树（35s 且查不到本地技能）。
+  - `claude.ts` 的 `buildHermesArgs()` 新增 `preloadSkillName`，命中时追加 `-s <name>` 并跳过全文嵌入；两个 spawn 点（`executeClaudeCommand` / `executeClaudeStreaming`）在 `return new Promise` **之前**完成决策。跑失败再回退会二次 spawn，写出两条 `executing` 事件，既污染执行次数统计也会让 PID 侦测拿旧进程误判——这是硬约束。review 修正：表格内同名多份的技能视为不可寻址（回退全文嵌入），防 `-s` Ambiguous 直接失败。
+  - 实测（profile `info-assistant`）：`-s code-livephoto` 通过解析、直达模型调用；`-s <不存在的名字>` 立即 `Unknown skill(s)` 退出，两种失败模式可区分。解析器对真实 `skills list` 输出：57 个精确名 / 2 个截断行，`code-livephoto`、`tingwu-asr`、`pdf-processor` 走 `-s`，`code-video`（同级目录未装进 profile）与不存在名回退嵌入。
+- **清掉 Hermes 技能树内的历史快照 SKILL.md**：`private-skills/code-livephoto/archive` 下 5 份历史 SKILL.md 会被 Hermes 的 `os.walk` 全部收成独立技能，导致 `-s code-livephoto` 报 Ambiguous、`code-video` 假命中归档旧快照。其中 4 份与 git 提交逐字节相同（`176a80d2…`=`3794f054f`、`be68834d…`=`18ff3cb66`、`7a5113cb…`=`e3c2fb8ee`）已删；唯一不在 git 的审计快照 `7a19a3f1…` 改名保留为 `SKILL.md.audit-snapshot`。技能树复扫：59 个技能、archive 内 0 残留、无同名冲突。**命名约束**：技能目录内除 `references/ templates/ assets/ scripts/` 四个支持目录外，任何地方都不能再有 SKILL.md。
 - **CodeBuddy 后端适配（无头模式）**：执行后端不再局限于 Claude Code，可在 Raycast 偏好中切换默认后端，也可在插件 UI 中临时切换为 CodeBuddy CLI。
   - 新增 Raycast 偏好「执行后端」（`backend`，dropdown，默认 `claude`）与「CodeBuddy CLI 可执行文件路径」（`codebuddyBin`，textfield，默认 `~/.local/bin/codebuddy`）。
   - **UI 内执行后端切换**：`commands.tsx` 新增 `selectedBackend` 状态（默认取全局偏好），列表级、自由指令、每个技能的 ActionPanel 均提供「执行后端：Claude Code / CodeBuddy」切换按钮（快捷键 `Cmd+Shift+B`），执行时以当前选中后端为准，无需进设置页。
@@ -48,6 +62,11 @@
 
 ### 修复 (Fixed)
 
+- **技能列表使用次数不更新 / 看起来不按使用频次排序**：排序比较器本身（置顶 > 新 > 使用次数 > 名称）没有问题，用真实数据重放顺序正确；问题出在喂给它的次数。根因两层：
+  - **`stats.json` 自 2026-08-12 起再未写入**：`recordExecution` 只在 `await executeClaudeCommand(...)` 返回后调用，而无头模式一跑数分钟，用户中途关掉 Raycast 窗口即终止扩展进程，await 永不返回、统计永不落账；之后 `status.ts` 的 PID 侦测只把 `completed/failed` 补写进 JSONL，不补 stats。列表显示的次数全靠 JSONL `executing` 事件兜底（`max(stats, log)`），状态页"累计执行 N 次"则一直停在 8 月。修复：`extractRunInfo` 在两处 PID 侦测补写点同步调用 `recordExecution(statsKeyForCmd(cmd), …)`——这条路径只在没有 completed/failed 事件时触发，恰好等价于"扩展侧记账被漏掉"，不会与正常路径重复计数；自由指令统一归入 `free-command`，与 `commands.tsx` 口径一致。review 修正：两处补记点写终态事件前重读该 runId（commands 与 status 双进程轮询的窄窗内已由对方补记则让位），防跨进程双计。
+  - **三层缓存叠加导致执行刚结束时刷新无效**：`skillsCache` 10s + `logCountCache` 5s，而 `recordExecution` 只失效 `statsCache`，`finally` 里紧随的 `loadSkills()` 直接吐回旧排序。修复：`invalidateSkillsCache()` 连带失效 stats 与 log 两个缓存；`executeSkill` / `executeFreeCommand` / 队列执行器三条 `finally` 路径在 `loadSkills()` 前调用它（队列路径此前根本不刷新列表，一并补上）。
+  - 附带：`extractCommandName` 的正则从 `[a-zA-Z0-9-]+` 放宽为 `[^\s"']+`，否则含下划线或中文的技能名会被截断导致计数永远为 0。
+- **"描述太长的技能右侧不显示次数"**：实际是两件事叠加——描述最长的那批（xlsx 943 字、docx 799、ui-ux-pro-max 732、ego-browser 610……）恰好都是从未通过扩展执行过的技能（0 次），而旧代码 `executions > 0` 才渲染次数，于是整行看不到数字；反例 video-screenshot 描述 365 字照样显示 5。修复：次数 accessory **始终渲染**（0 用 `Color.SecondaryText` 弱化，tooltip "累计执行 N 次"），排序一眼可读；同时 subtitle 截断到 80 字并把全文放 tooltip，避免近千字 frontmatter description 把右侧 accessories 挤到看不见。
 - **Hotkey/Quicklink/Universal Action 触发命令时被 Raycast 强制弹出「Welcome to Agent Executor — Before you can start using this command, you will need to add a few things to the settings」拦截页，每次都要按 ⌘↩ 才能进主界面**：根因不是偏好缺失（`projectDir1` 已正常配置），而是 `package.json` 中 `preferences.headlessPreamble.type` 误写为 `"textarea"` —— Raycast manifest schema 合法的 preference `type` 仅 `textfield` / `password` / `dropdown` / `checkbox` / `appPicker` / `file` / `directory`（官方 docs/information/manifest.md），`textarea` 不在枚举内。schema 校验失败后 Raycast 把整个 manifest 判为 invalid，每次启动 `commands` 命令都会回落到系统 Welcome 拦截页。本地 `ray lint` 此前一直在报的 `144:14 must be equal to one of the allowed values` 警告就是这个根因的直白提示。修复：`type: "textarea" → "textfield"`，description 同步说明「Raycast preference 无 textarea 类型，长文本可粘贴进 textfield」。验证：本地 `npm run lint` 在切换后不再报 `144:14 allowed values`；实际生效需 `ray develop` 重读 manifest 后用 Hotkey 触发一次。
 - **无头执行结果/会话捕获丢失（stdout 为空 + 进程变僵尸导致任务卡死，Claude 与 CodeBuddy 均存在）**：非流式路径原本用 `--output-format json`，该格式会把最终结果**缓冲到最后一次性写入 stdout**，进程异常退出/未回收时 stdout 为空，导致结果文本和 `session_id` 全部丢失，`executeClaudeCommand` 的 promise 永久挂起，任务在 UI 里一直显示「执行中」、日志停在 `executing`，事后靠状态页 `pid_detection` 兜底恢复成 `failed`（8/12、8/13 的 `/pdf-processor` 任务即此现象）。修复：
   - `src/utils/claude.ts` 的 `executeClaudeCommand`：**Claude 与 CodeBuddy 统一改用 `--output-format stream-json --verbose`** 逐行输出（实测两者均稳定吐最终 `result` 行，含 `result`/`is_error`/`session_id`；Claude 的 stream-json 要求带 `--verbose`）。
@@ -64,6 +83,8 @@
 
 ### 优化 (Improved)
 
+- **Hermes 嵌入技能正文时补上目录说明**：Hermes 后端走 `-q --oneshot` 时不会展开 `/skill` 斜杠命令（`hermes_cli/cli_single_query.py` 无该逻辑），扩展因此把 SKILL.md 全文嵌进 query；但 Hermes 自己的 `/skill` 与 `-s` 预加载都会附带技能目录并要求相对路径按该目录解析（`agent/skill_commands.py` 的 `_SKILL_DIR_NOTE`），我们的嵌入版缺这一行，模型看到 `references/…`、`scripts/…`、`../code-video/…` 只能猜位置。新增 `readSkillContentForEmbedding()`：在全文前加一行「技能目录 + 相对路径解析规则」，直接执行、流式执行、队列回放三处统一使用。机制未变（仍是全文嵌入），为何暂不切 `-s` 见 ROADMAP 技术债「Hermes 技能加载方式」。
+- **无头模式前置指令精简重写**：旧版 `DEFAULT_HEADLESS_PREAMBLE` 是整段压制式指令——声称"用户不在线无法回复任何提问"、"本指令优先级高于任何 skill 正文中先询问/等待确认的说明"（连删除、覆盖这类安全闸一起压掉，与 AGENTS.md「敏感操作先确认」冲突）、并硬编码 PaddleOCR/MinerU 等具体技能名做全局外传授权（mineru-ocr 早已移除）。现版压缩为 3 行，只说清一件事：**用户不盯运行过程，一次把任务跑完**——不提问不等确认，需要选择取默认值并在结尾注明假设，只有无法继续才停；技能正文里"先询问"的步骤直接处理；已配置外部服务视为已授权，留言要求保密时改本地；删除/覆盖原文件默认写新文件代替，仅留言明确要求时执行；保留 YYMMDD 产出命名与结束汇报格式。`package.json` 中 `headlessPreamble` 偏好说明同步精简；用户仍可在偏好中整体覆盖。
 - **TypeScript 类型安全**：为 logs-viewer、status、logger 添加 `JsonLogEvent`/`JsonLogEntry` 接口，替换 `any` 为具体类型；移除未使用的导入和变量。
 - **tingwu-asr 单任务查询**：`poll_tasks.py` 新增 `--once` 和 `--task-id <id>` 参数，新 session 续做时一句命令即可查询单任务状态；`watch_active.sh` 跨 session 持久化状态日志。
 
@@ -351,6 +372,7 @@
 ## [0.1.0] - 2026-01-10
 
 ### 新增 (Added)
+
 - 初始版本的 AutoWeave Raycast 扩展
 - 支持从 Finder 中选中文件进行处理
 - 实现动态命令列表显示
@@ -370,6 +392,7 @@
 ## 格式说明
 
 变更类型：
+
 - **新增 (Added)**：新功能
 - **变更 (Changed)**：现有功能的变更
 - **弃用 (Deprecated)**：即将移除的功能

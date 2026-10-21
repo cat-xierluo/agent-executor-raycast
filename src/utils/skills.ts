@@ -8,14 +8,14 @@ import {
   rmSync,
   cpSync,
 } from "fs";
-import { join, basename, resolve } from "path";
+import { join, basename, dirname, resolve } from "path";
 import { Icon } from "@raycast/api";
 import { execSync } from "child_process";
 import { homedir } from "os";
 import { getProjectName, isValidSkillsDir } from "./claude";
 import { applyMetadataToSkills } from "./commandMetadata";
-import { readStats } from "./stats";
-import { countExecutionsFromLog } from "./status";
+import { readStats, invalidateStatsCache } from "./stats";
+import { countExecutionsFromLog, invalidateLogCountCache } from "./status";
 
 /**
  * Claude Skill 接口
@@ -327,6 +327,10 @@ export function invalidateSkillsCache(): void {
   skillsCache = null;
   skillsCacheTime = 0;
   skillsCacheKey = "";
+  // 使用次数来自 stats.json 与 JSONL 两个来源，连带失效才能让
+  // 紧随其后的 loadSkills() 拿到最新的次数与排序（否则最多滞后 10s+5s）
+  invalidateStatsCache();
+  invalidateLogCountCache();
 }
 
 /**
@@ -502,6 +506,18 @@ function getSkillIcon(name: string): Icon {
  */
 export function readSkillContent(skillFile: string): string {
   return readFileSync(skillFile, "utf-8");
+}
+
+/**
+ * 读取要嵌入 Hermes query 的技能正文：在 SKILL.md 全文前加一行目录说明。
+ * Hermes 自己的 /skill 与 -s 预加载都会告诉模型技能目录并要求相对路径按该目录解析
+ * （agent/skill_commands.py 的 _SKILL_DIR_NOTE）；我们绕开 Hermes 索引直接嵌全文时
+ * 没有这行，模型看到 references/… scripts/… ../同级技能 只能瞎猜位置。
+ */
+export function readSkillContentForEmbedding(skillFile: string): string {
+  const skillDir = dirname(skillFile);
+  const note = `[技能「${basename(skillDir)}」目录：${skillDir}。正文里的相对路径（references/…、scripts/…、../同级技能）一律相对该目录解析，运行脚本用绝对路径。]`;
+  return `${note}\n\n${readSkillContent(skillFile)}`;
 }
 
 /**
