@@ -206,7 +206,8 @@
   ],
   "dependencies": {
     "@raycast/api": "^1.103.3",
-    "@raycast/utils": "^2.2.1"
+    "@raycast/utils": "^2.2.1",
+    "yaml": "2.9.1"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.0.4",

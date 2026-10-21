@@ -266,6 +266,7 @@ export function buildHermesArgs(
   skillContent?: string,
   headlessPreamble?: string,
   preloadSkillName?: string,
+  model?: string,
 ): string[] {
   let query = prompt;
   // preloadSkillName 走 Hermes 原生预加载：技能正文由 Hermes 写进 system prompt
@@ -298,6 +299,9 @@ export function buildHermesArgs(
     // 预加载技能（-s）：Hermes 解析该名字后把技能写进 system prompt。
     // 必须在 spawn 前决定好——跑失败再回退会二次 spawn，写出两条 executing 事件。
     ...(preloadSkillName ? ["-s", preloadSkillName] : []),
+    // 显式模型（-m provider/model）：空 = 跟随 config.yaml 的 model.default。
+    // provider/model 形态见 hermes chat --help 示例（anthropic/claude-sonnet-4）。
+    ...(model ? ["-m", model] : []),
   ];
 }
 
@@ -373,6 +377,7 @@ export interface ClaudeExecutionOptions {
   codebuddyBin?: string;
   hermesBin?: string;
   hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
+  hermesModel?: string; // Hermes 后端：显式模型（provider/model）；空 = 跟随 config.yaml 默认
   backend?: AgentBackend;
   skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
   skillFile?: string; // Hermes 后端：技能定义文件；用于判断能否改走 -s 原生预加载
@@ -407,6 +412,7 @@ export interface ClaudeStreamingOptions {
   codebuddyBin?: string;
   hermesBin?: string;
   hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
+  hermesModel?: string; // Hermes 后端：显式模型（provider/model）；空 = 跟随 config.yaml 默认
   backend?: AgentBackend;
   skillContent?: string; // Hermes 后端：SKILL.md 全文，直接嵌入 query（不依赖 Hermes 技能索引）
   skillFile?: string; // Hermes 后端：技能定义文件；用于判断能否改走 -s 原生预加载
@@ -550,6 +556,7 @@ export async function executeClaudeStreaming(
     codebuddyBin: customCodebuddyBin,
     hermesBin: customHermesBin,
     hermesProfileHome,
+    hermesModel,
     backend,
     skillContent,
     prompt,
@@ -614,6 +621,7 @@ export async function executeClaudeStreaming(
           skillContent,
           streamPreamble,
           streamPreload,
+          hermesModel,
         )
       : [
           "-p",
@@ -839,6 +847,7 @@ export async function executeClaudeCommand(
     codebuddyBin: customCodebuddyBin,
     hermesBin: customHermesBin,
     hermesProfileHome,
+    hermesModel,
     backend,
     skillContent,
     prompt,
@@ -874,9 +883,10 @@ export async function executeClaudeCommand(
         // Hermes 后端：无 --print/--output-format，走 chat -q 参数体系；
         // 可视化模式用户在场，不嵌 skill 正文与无头前置指令，靠 TTY 交互。
         // --source cli 让会话在桌面端可见（Hermes 默认把 oneshot 会话隐藏）。
+        // -m 双引号包裹：模型名可能含方括号（zai_glm-5.3-flash[1M]），防 shell 展开。
         const isHermes = backend === "hermes";
         const runCmd = isHermes
-          ? `"${claudeBin}" chat -q "$PROMPT" --source cli`
+          ? `"${claudeBin}" chat -q "$PROMPT" --source cli${hermesModel ? ` -m "${hermesModel}"` : ""}`
           : `"${claudeBin}" --print --dangerously-skip-permissions --output-format json "$PROMPT"`;
 
         const scriptContent = `#!/bin/bash
@@ -1005,6 +1015,7 @@ end tell`;
             skillContent,
             printPreamble,
             printPreload,
+            hermesModel,
           )
         : [
             "--print",

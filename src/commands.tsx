@@ -39,6 +39,16 @@ import {
   writeSelectedBackendSync,
   resolveProfileHome,
 } from "./utils/hermesProfile";
+import {
+  getSelectedHermesModel,
+  getSelectedHermesModelSync,
+  setSelectedHermesModel as persistSelectedHermesModel,
+  loadHermesModelCatalog,
+  defaultModelTitle,
+  DEFAULT_MODEL_CHOICE,
+  dropdownValueToModel,
+  type HermesModelCatalog,
+} from "./utils/hermesModel";
 import { toggleSkillPinned, toggleSkillNew } from "./utils/commandMetadata";
 import { parseNoteInput } from "./utils/urlDetector";
 import {
@@ -170,6 +180,32 @@ export default function CommandList(
   // 快路径下 profile 状态在首个渲染帧就已就绪，门恒开（保留字段兼容旧引用）
   const [profileReady] = useState<boolean>(true);
 
+  // Hermes 模型选择（主界面下拉，右下角常驻）：~/.hermes/active-model 双写持久化，
+  // 同步快路径保证下拉首帧回显。DEFAULT_MODEL_CHOICE = 默认（spawn 时不传 -m）。
+  // 清单同步解析当前 profile 的 config.yaml；执行时所有路径后台自动携带 hermesModel。
+  const [hermesModelChoice, setHermesModelChoice] = useState<string>(
+    () => getSelectedHermesModelSync() || DEFAULT_MODEL_CHOICE,
+  );
+  const [modelCatalog, setModelCatalog] = useState<HermesModelCatalog | null>(
+    () => {
+      // 与技能扫描同源：运行时选中的 profile 优先，偏好 hermesProfile 兜底
+      const home = resolveProfileHome(getSelectedHermesProfileSync());
+      if (home) return loadHermesModelCatalog(home);
+      try {
+        return loadHermesModelCatalog(getConfig().hermesProfileHome);
+      } catch {
+        return null;
+      }
+    },
+  );
+  const currentHermesModel = dropdownValueToModel(hermesModelChoice);
+  const selectedModelInCatalog =
+    !currentHermesModel ||
+    (modelCatalog?.providers.some((g) =>
+      g.models.some((m) => `${g.provider}/${m}` === currentHermesModel),
+    ) ??
+      false);
+
   // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy / Hermes 间轮换）
   const backendToggleAction = (
     <Action
@@ -266,10 +302,25 @@ export default function CommandList(
         if ((home || undefined) !== activeProfileHome) {
           setActiveProfileHome(home);
           setProfileLabel(home ? name : "主 Hermes");
+          // profile 变了模型清单跟着变（各 profile 的 config.yaml 独立）
+          setModelCatalog(loadHermesModelCatalog(home));
           loadSkillsRef.current();
         }
       } catch {
         // 读取失败保持同步初始值（主 Hermes），不打扰用户
+      }
+    })();
+  }, []);
+
+  // 模型选择同款迁移：文件快路径缺失但 LocalStorage 有旧值 → 修正 state（值已回写文件）
+  useEffect(() => {
+    (async () => {
+      try {
+        const saved = await getSelectedHermesModel();
+        const choice = saved || DEFAULT_MODEL_CHOICE;
+        if (choice !== hermesModelChoice) setHermesModelChoice(choice);
+      } catch {
+        // 保持同步初始值
       }
     })();
   }, []);
@@ -314,6 +365,7 @@ export default function CommandList(
           codebuddyBin: task.codebuddyBin,
           hermesBin: task.hermesBin,
           hermesProfileHome: task.hermesProfileHome,
+          hermesModel: task.hermesModel,
           backend: task.backend,
           skillContent,
           skillFile: task.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
@@ -371,6 +423,10 @@ export default function CommandList(
         activeProfileHome ?? config.hermesProfileHome,
       );
       setItems(availableSkills);
+      // 模型清单同源重读：主配置 + profile 合并（config.yaml 改动后 Cmd+R 即生效）
+      setModelCatalog(
+        loadHermesModelCatalog(activeProfileHome ?? config.hermesProfileHome),
+      );
     } catch (error) {
       const configError = error as Error & { isConfigError?: boolean };
       const isConfigError = error instanceof Error && configError.isConfigError;
@@ -613,6 +669,7 @@ export default function CommandList(
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
+          hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -648,6 +705,7 @@ export default function CommandList(
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
+          hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           onPid: (pid) => {
@@ -679,6 +737,7 @@ export default function CommandList(
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
             hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
+            hermesModel: dropdownValueToModel(hermesModelChoice),
             backend: runtimeBackend,
             headlessMode: config.headlessMode,
             onPid: (pid) => {
@@ -903,6 +962,7 @@ export default function CommandList(
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
+          hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
           headlessMode: config.headlessMode,
           streamingMode: config.streamingMode,
@@ -938,6 +998,7 @@ export default function CommandList(
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
+          hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
           skillContent: readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
           skillFile: skill.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
@@ -971,6 +1032,7 @@ export default function CommandList(
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
             hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
+            hermesModel: dropdownValueToModel(hermesModelChoice),
             backend: runtimeBackend,
             skillContent: readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
             skillFile: skill.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
@@ -1098,6 +1160,40 @@ export default function CommandList(
       searchBarPlaceholder="附加留言 / URL（http:// https:// file:// x-devonthink-item://）..."
       searchText={note}
       onSearchTextChange={setNote}
+      searchBarAccessory={
+        <List.Dropdown
+          tooltip="Hermes 模型（选定后所有执行自动以 -m 传给后端）"
+          value={hermesModelChoice}
+          onChange={(v) => {
+            setHermesModelChoice(v);
+            // 即时双写持久化；执行路径只读内存态，无需再确认
+            void persistSelectedHermesModel(dropdownValueToModel(v) ?? "");
+          }}
+        >
+          <List.Dropdown.Item
+            title={defaultModelTitle(modelCatalog)}
+            value={DEFAULT_MODEL_CHOICE}
+          />
+          {modelCatalog?.providers.map((group) => (
+            <List.Dropdown.Section key={group.provider} title={group.provider}>
+              {group.models.map((m) => (
+                <List.Dropdown.Item
+                  key={m}
+                  title={m}
+                  value={`${group.provider}/${m}`}
+                />
+              ))}
+            </List.Dropdown.Section>
+          ))}
+          {/* 已选模型不在当前 profile 清单里（切了 profile）：保留回显并照传，hermes 报错可见 */}
+          {!selectedModelInCatalog && currentHermesModel && (
+            <List.Dropdown.Item
+              title={`${currentHermesModel}（当前 profile 未提供）`}
+              value={hermesModelChoice}
+            />
+          )}
+        </List.Dropdown>
+      }
       actions={
         <ActionPanel>
           {backendToggleAction}

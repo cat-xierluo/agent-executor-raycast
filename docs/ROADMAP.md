@@ -1,6 +1,6 @@
 # Agent Executor 项目路线图
 
-> Last updated: 2026-05-20
+> Last updated: 2026-10-20
 > 本文是 Agent Executor Raycast Extension 的发展路线图，记录已完成功能和未来计划。
 
 ## 项目愿景
@@ -344,6 +344,10 @@ const child = spawn('/bin/bash', ['-c', bashCommand], {
 ---
 
 ## 进度日志
+
+### 2026-10-20
+
+- **Hermes 模型选择（主界面常驻下拉）**：主列表搜索栏右下角 `List.Dropdown` 常驻选择器，选定后所有执行路径后台自动携带 `-m provider/model`。清单**主配置 + profile 配置合并**（对齐 Hermes 配置叠加语义——profile 只覆盖 `model.default`、providers 继承主配置，此前只读 profile 侧导致只显示默认项），新增 `yaml` 依赖与 `hermesModel.ts`；config.yaml 增删模型后重开命令或 `Cmd+R` 即动态重读；持久化 `~/.hermes/active-model` 双写（跨会话记忆），与 backend/profile 快路径同款；`QueuedTask` 透传 `hermesModel`，排队回放不丢。仅 Hermes 后端生效。
 
 ### 2026-10-17
 

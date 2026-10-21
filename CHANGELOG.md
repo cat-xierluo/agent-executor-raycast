@@ -6,6 +6,11 @@
 
 ### 新增 (Added)
 
+- **Hermes 模型选择（主界面常驻下拉）**：主列表搜索栏右下角新增 `List.Dropdown` 模型选择器，选定后所有执行路径（技能、带 URL/备注、自由指令、排队任务、可视化终端）在后台自动以 `-m provider/model` 传给 Hermes，无需任何手动输入。
+  - 新增 `src/utils/hermesModel.ts`：解析 `config.yaml` 得到 `model.default` + 各 provider 模型清单；**合并语义对齐 Hermes 配置叠加**——profile 的 config.yaml 通常只覆盖 `model.default`、`providers` 继承主配置，故清单 = 主配置打底 + profile 同名键覆盖（providers 逐键替换），「当前 profile 可用的全部模型」完整列出；选择持久化走 `~/.hermes/active-model` 文件 + LocalStorage 双写（与 active-profile/active-backend 同款快路径，重开命令回显秒开、跨会话记忆）。
+  - 清单动态生效：profile 的 config.yaml 增删模型后，重开命令或 `Cmd+R` 刷新列表即重读（刷新动作与技能扫描同源刷新 catalog）。
+  - `buildHermesArgs()` 新增 `model` 参数追加 `-m`；`ClaudeExecutionOptions`/`ClaudeStreamingOptions` 新增 `hermesModel`，两处 spawn 点与可视化终端 shell 分支（带引号，防 `zai_glm-5.3-flash[1M]` 方括号名被 shell 展开）全部透传；`QueuedTask` 增加 `hermesModel`，排队回放不丢选择。
+  - 下拉首项「默认（glm-5.3 @ zai）」= 不传 `-m` 跟随 Hermes 配置；清单跟随当前 profile 切换自动刷新；已选模型不在当前 profile 清单时保留回显并照传（标注「当前 profile 未提供」），由 Hermes 报错可见而非静默清空。仅影响 Hermes 后端，claude/codebuddy 无感。
 - **Hermes Profile 动态选择器**：新增「选择 Hermes Profile」命令（select-profile），动态扫描 `~/.hermes/profiles/` 列出所有 profile（含 description 与 skill 数），回车即切换；LocalStorage 持久化，后续新增 bot（新建 profile 目录）自动出现在列表中，无需改代码。
   - 主界面 ActionPanel 新增「Hermes Profile：当前值」指示（`Cmd+Shift+P` 跳转选择器）；当前选中的 profile 显示 ✓。
   - `commands.tsx` 组件层新增 `activeProfileHome` 状态：异步读 LocalStorage 后**覆盖 textfield 偏好**，7 处执行/扫描路径统一生效；清空选择即回主 Hermes。
