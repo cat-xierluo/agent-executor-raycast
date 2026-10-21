@@ -322,6 +322,8 @@ const child = spawn('/bin/bash', ['-c', bashCommand], {
 | 状态管理        | 引入状态管理库（如 Zustand），统一状态更新机制，缓存策略优化，状态持久化 | 🟡 中  | ⚪ 待开始   |
 | 错误处理完善    | 网络错误处理，文件权限错误提示，超时处理优化，异常恢复机制               | 🟡 中  | ⚪ 待开始   |
 | Hermes 会话状态回读 | Hermes 后端执行后 Raycast 侧显示"(无输出)"且状态失真（见下）         | 🟠 高  | ⚪ 待开始   |
+| 扩展侧完成路径不可靠 | 无头模式关窗即杀扩展进程，`await` 之后的 HUD/toast/记账全部丢失；统计已改由 PID 侦测补写兜底（2026-10-16），但完成通知、流式收尾仍依赖进程存活。方向：把"完成后要做的事"全部下沉到状态侦测层，或改用 `launchCommand` 后台命令承接 | 🟡 中  | 🟡 部分完成 |
+| Hermes 技能加载方式 | **已于 2026-10-17 切换完成**：可寻址时走 `-s` 原生预加载（Hermes 写 system prompt，自带目录/支撑文件清单/config），不可寻址回退全文嵌入。探测见 `src/utils/hermesSkills.ts`，决策在 spawn 前完成（回退二次 spawn 会写两条 executing 事件、污染计数并让 PID 侦测误判）。`code-video` 原为 `private-skills` 同级目录、未装进任何 profile，`-s` 取不到——已软链进 `~/.hermes/profiles/info-assistant/skills/code-video`（Hermes 认技能必须有 SKILL.md，该文件一度在工作区被删，已从 HEAD 还原）。复扫 60 技能、零同名冲突 | ✅ 已完成 |
 
 ### Hermes 会话状态回读（2026-09-14 实测记录）
 
@@ -342,6 +344,19 @@ const child = spawn('/bin/bash', ['-c', bashCommand], {
 ---
 
 ## 进度日志
+
+### 2026-10-17
+
+- **`code-video` 装进 Hermes profile**：软链到 `~/.hermes/profiles/info-assistant/skills/code-video`，`-s code-video` 实测解析成功（此前它不在任何 profile，`-s` 取不到，只能靠 code-livephoto 正文里的 `../code-video/` 相对路径）。前置修复：该技能的 `SKILL.md` 曾被误删（工作区 `D` 状态，HEAD 中完好），已从 HEAD 还原并校验哈希。
+- **清理 C 波归档里的悬空软链**：`archive/261016_CLC-040-C波/skills-{old,new}/code-video` 是指向活动技能目录的软链而非冻结副本，使 `os.walk` 收进两份同名 code-video；已删除这两个软链（不删数据）。技能树复扫：60 技能、零同名冲突、archive 零残留。
+- **Hermes 技能加载切换为 `-s` 原生预加载**（可寻址时）：新增 `hermesSkills.ts` 探测 + `buildHermesArgs` 支持 `-s`，决策置于 spawn 前（回退二次 spawn 会写两条 executing 事件、污染计数并让 PID 侦测误判）；实测 code-livephoto / code-video 均走 `-s` 成功，不存在名立即 `Unknown skill(s)`，与模型侧失败可区分。
+
+### 2026-10-16
+
+- **技能列表使用次数与排序修复**：排序逻辑本身正确，问题在数据源——`stats.json` 自 8/12 起未再写入（无头模式关窗杀进程，`await` 后的 `recordExecution` 不执行）。`status.ts` 的 PID 侦测补写 completed/failed 时同步记账；`invalidateSkillsCache()` 连带失效 stats/log 缓存，三条执行 `finally` 路径执行后立即刷新；`extractCommandName` 放宽字符集。
+- **列表可读性**：使用次数 accessory 始终显示（0 弱色 + tooltip）；描述截断 80 字、全文进 tooltip。
+- **无头前置指令精简重写**：从"最高优先级覆盖一切"的压制式长文压缩为 3 行，核心只保留"用户不盯运行、一次跑完"的立场：不提问取默认值并注明假设，技能里"先询问"步骤直接处理，已配置外部服务视为已授权，删除/覆盖原文件默认写新文件代替；`package.json` 偏好说明同步精简。
+- **技术债新增**：扩展侧完成路径不可靠（见上表）。
 
 ### 2026-05-01
 

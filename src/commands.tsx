@@ -8,6 +8,7 @@ import {
   getSelectedFinderItems,
   getSelectedText,
   Icon,
+  Color,
   closeMainWindow,
   showHUD,
   confirmAlert,
@@ -25,7 +26,12 @@ import {
   type AgentBackend,
 } from "./utils/claude";
 import { RunLogger } from "./utils/logger";
-import { scanSkills, ClaudeSkill, readSkillContent } from "./utils/skills";
+import {
+  scanSkills,
+  invalidateSkillsCache,
+  ClaudeSkill,
+  readSkillContentForEmbedding,
+} from "./utils/skills";
 import {
   getSelectedHermesProfile,
   getSelectedHermesProfileSync,
@@ -33,7 +39,6 @@ import {
   writeSelectedBackendSync,
   resolveProfileHome,
 } from "./utils/hermesProfile";
-import { readFileSync } from "fs";
 import { toggleSkillPinned, toggleSkillNew } from "./utils/commandMetadata";
 import { parseNoteInput } from "./utils/urlDetector";
 import {
@@ -66,6 +71,22 @@ import {
 
 // 不需要文件的 Skill 名称列表（兼容层）
 const SKILLS_NO_FILE_REQUIRED = ["deepresearch", "sync-external"];
+
+// 列表行副标题上限：frontmatter description 可达近千字（如 xlsx/docx），
+// 超长会把右侧 accessories 挤到看不见；截断后全文放 tooltip
+const DESCRIPTION_MAX_CHARS = 80;
+
+function truncateDescription(
+  description: string,
+): string | { value: string; tooltip: string } {
+  if (description.length <= DESCRIPTION_MAX_CHARS) {
+    return description;
+  }
+  return {
+    value: `${description.slice(0, DESCRIPTION_MAX_CHARS)}…`,
+    tooltip: description,
+  };
+}
 // 需要确认弹窗的 Skill 名称列表（兼容层）
 const SKILLS_REQUIRE_CONFIRM: Record<
   string,
@@ -274,11 +295,11 @@ export default function CommandList(
       );
       logger.logValidated();
 
-      // Hermes 后端：读 SKILL.md 全文嵌入 query（不依赖 Hermes 技能索引）
+      // Hermes 后端：读 SKILL.md 全文（带目录说明）嵌入 query（不依赖 Hermes 技能索引）
       let skillContent: string | undefined;
       if (task.backend === "hermes" && task.skillFile) {
         try {
-          skillContent = readFileSync(task.skillFile, "utf-8");
+          skillContent = readSkillContentForEmbedding(task.skillFile);
         } catch {
           // 读不到就让 prompt 原样执行（技能正文缺失，仅任务描述）
         }
@@ -295,6 +316,7 @@ export default function CommandList(
           hermesProfileHome: task.hermesProfileHome,
           backend: task.backend,
           skillContent,
+          skillFile: task.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
           headlessMode: task.headlessMode,
         },
         logger,
@@ -321,6 +343,8 @@ export default function CommandList(
       setProcessingCommand((prev) =>
         prev.filter((c) => c.name !== task.skillName),
       );
+      invalidateSkillsCache();
+      loadSkillsRef.current();
       loadRunningCountRef.current();
       setQueuedTasks(getQueuedTasks());
       triggerStatusRefresh();
@@ -733,6 +757,7 @@ export default function CommandList(
         setIsStreaming(false);
       }
       loadRunningCount();
+      invalidateSkillsCache();
       loadSkills();
       triggerStatusRefresh();
       scheduleNext();
@@ -744,7 +769,10 @@ export default function CommandList(
    * 执行技能（包含兼容层的特殊处理）
    * @param backendOverride 可选：覆盖当前选中的执行后端
    */
-  async function executeSkill(skill: ClaudeSkill, backendOverride?: AgentBackend) {
+  async function executeSkill(
+    skill: ClaudeSkill,
+    backendOverride?: AgentBackend,
+  ) {
     if (processingCommand.some((c) => c.name === skill.name)) return;
 
     // 解析搜索栏：分离 URL 与剩余备注
@@ -911,7 +939,8 @@ export default function CommandList(
           hermesBin: config.hermesBin,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           backend: runtimeBackend,
-          skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
+          skillContent: readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
+          skillFile: skill.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
           headlessMode: config.headlessMode,
           onPid: (pid) => {
             activePids.current[skill.name] = pid;
@@ -943,7 +972,8 @@ export default function CommandList(
             hermesBin: config.hermesBin,
             hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
             backend: runtimeBackend,
-            skillContent: readSkillContent(skill.skillFile), // Hermes 后端：SKILL.md 全文嵌入 query
+            skillContent: readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
+            skillFile: skill.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
             headlessMode: config.headlessMode,
             onPid: (pid) => {
               activePids.current[skill.name] = pid;
@@ -1019,6 +1049,7 @@ export default function CommandList(
         setIsStreaming(false);
       }
       loadRunningCount();
+      invalidateSkillsCache();
       loadSkills();
       triggerStatusRefresh();
       scheduleNext();
@@ -1302,7 +1333,7 @@ export default function CommandList(
                     )}
                     {backendToggleAction}
                     {profileToggleAction}
-          {profileToggleAction}
+                    {profileToggleAction}
                   </ActionPanel>
                 }
               />
@@ -1333,7 +1364,7 @@ export default function CommandList(
                 key={skill.skillDir}
                 id={skill.skillDir}
                 title={`${skill.pinned ? "📌 " : ""}${skill.isNew ? "✨ " : ""}${skill.title}`}
-                subtitle={skill.description}
+                subtitle={truncateDescription(skill.description)}
                 icon={skill.icon}
                 accessories={[
                   (() => {
@@ -1350,9 +1381,13 @@ export default function CommandList(
                   skill.isNew && !skill.pinned
                     ? { text: "新", icon: Icon.Star }
                     : null,
-                  skill.executions && skill.executions > 0
-                    ? { text: String(skill.executions) }
-                    : null,
+                  {
+                    text: {
+                      value: String(skill.executions ?? 0),
+                      color: skill.executions ? undefined : Color.SecondaryText,
+                    },
+                    tooltip: `累计执行 ${skill.executions ?? 0} 次`,
+                  },
                   inputTailLabel
                     ? { text: inputTailLabel, icon: Icon.Link }
                     : null,
@@ -1413,7 +1448,7 @@ export default function CommandList(
                     )}
                     {backendToggleAction}
                     {profileToggleAction}
-          {profileToggleAction}
+                    {profileToggleAction}
                     <Action
                       title="切换置顶状态"
                       onAction={() => {

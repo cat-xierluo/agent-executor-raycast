@@ -34,7 +34,7 @@ type ExtensionPreferences = {
   "enableDefaultSkills": boolean,
   /** 流式输出模式 - 实时显示 Claude 的输出（类似 SkillLauncher） */
   "streamingMode": boolean,
-  /** 无头模式前置指令 - 可选：后台（无头）模式下注入给 Agent 的系统级前置指令，用于压制不必要的提问与确认。留空则使用内置默认（默认授权所有需外传的已配置后端、不向用户提问、输出按 YYMMDD 前缀写入输入文件目录）。仅在后台运行模式启用时生效。Raycast preference 无 textarea 类型，长文本可粘贴进 textfield。 */
+  /** 无头模式前置指令 - 可选：后台（无头）模式下注入给 Agent 的前置指令。留空使用内置默认：一次跑完不提问、按默认值继续并注明假设；已配置外部服务视为已授权（留言要求保密时改本地）；不可逆操作默认写新文件代替；产出按 YYMMDD 前缀写入输入文件目录。仅后台模式生效；长文本可粘贴进 textfield。 */
   "headlessPreamble"?: string,
   /** 最大并发数 - 同时运行的最大 Agent 数量，超出部分排队等待 */
   "concurrencyLimit": "1" | "3" | "5" | "10" | "15"

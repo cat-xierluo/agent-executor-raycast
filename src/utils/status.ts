@@ -15,6 +15,7 @@ import {
   ERROR_LOG,
   writeJsonLog,
 } from "./logger";
+import { recordExecution } from "./stats";
 
 /**
  * 检查指定 PID 的进程是否真实存活
@@ -306,8 +307,16 @@ export function groupLogsByRunId(entries: LogEntry[]): Map<string, LogEntry[]> {
  * 例如："/legal-router \"/path/to/file.pdf\"" -> "legal-router"
  */
 export function extractCommandName(cmd: string): string {
-  const match = cmd.match(/^\/([a-zA-Z0-9-]+)/);
+  const match = cmd.match(/^\/([^\s"']+)/);
   return match ? match[1] : cmd;
+}
+
+/**
+ * 统计落账用的命令 key：以 / 开头的按斜杠命令取名，
+ * 否则（自由指令等）归入 free-command，与 commands.tsx 的记账口径一致
+ */
+function statsKeyForCmd(cmd: string): string {
+  return cmd.startsWith("/") ? extractCommandName(cmd) : "free-command";
 }
 
 /**
@@ -445,6 +454,13 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
           cmd: command,
           output: actualOutput,
         });
+        // 走到这里说明扩展进程在 await 返回前已被 Raycast 终止（无头模式关窗），
+        // commands.tsx 里的 recordExecution 从未执行，统计只能在此补记
+        recordExecution(
+          statsKeyForCmd(command),
+          true,
+          Math.round(duration * 1000),
+        );
       } else if (processInfo.status === "failed") {
         status = "failed";
         exitCode = -2; // 表示基于检测判定为失败
@@ -497,6 +513,11 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
           output: actualOutput,
           reason: "pid_detection",
         });
+        recordExecution(
+          statsKeyForCmd(command),
+          false,
+          Math.round(duration * 1000),
+        );
       } else {
         status = "running";
         console.log(`[extractRunInfo] 检测到PID ${pid} 仍在运行`);
@@ -707,6 +728,11 @@ export function clearAllHistory(): {
 let logCountCache: Record<string, number> | null = null;
 let logCountCacheTime = 0;
 const LOG_COUNT_CACHE_TTL = 5000;
+
+export function invalidateLogCountCache(): void {
+  logCountCache = null;
+  logCountCacheTime = 0;
+}
 
 export function countExecutionsFromLog(): Record<string, number> {
   if (logCountCache && Date.now() - logCountCacheTime < LOG_COUNT_CACHE_TTL) {
