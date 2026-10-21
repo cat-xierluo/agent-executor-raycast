@@ -7,9 +7,10 @@
 ### 新增 (Added)
 
 - **Hermes 模型选择（主界面常驻下拉）**：主列表搜索栏右下角新增 `List.Dropdown` 模型选择器，选定后所有执行路径（技能、带 URL/备注、自由指令、排队任务、可视化终端）在后台自动以 `-m provider/model` 传给 Hermes，无需任何手动输入。
-  - 新增 `src/utils/hermesModel.ts`：解析 `config.yaml` 得到 `model.default` + 各 provider 模型清单；**合并语义对齐 Hermes 配置叠加**——profile 的 config.yaml 通常只覆盖 `model.default`、`providers` 继承主配置，故清单 = 主配置打底 + profile 同名键覆盖（providers 逐键替换），「当前 profile 可用的全部模型」完整列出；选择持久化走 `~/.hermes/active-model` 文件 + LocalStorage 双写（与 active-profile/active-backend 同款快路径，重开命令回显秒开、跨会话记忆）。
+  - 新增 `src/utils/hermesModel.ts`：解析 `config.yaml` 得到 `model.default` + 各 provider 模型清单；合并语义按 Hermes 真实解析校准（2026-10-21 实测）：profile 自带 `providers` 段时以其为权威清单（HERMES_HOME 指向 profile 后 Hermes 不读主配置），profile 未定义时退回主配置；`model.default` 始终主配置打底、profile 覆盖。选择持久化走 `~/.hermes/active-model` 文件 + LocalStorage 双写（与 active-profile/active-backend 同款快路径，重开命令回显秒开、跨会话记忆）。
   - 清单动态生效：profile 的 config.yaml 增删模型后，重开命令或 `Cmd+R` 刷新列表即重读（刷新动作与技能扫描同源刷新 catalog）。
-  - `buildHermesArgs()` 新增 `model` 参数追加 `-m`；`ClaudeExecutionOptions`/`ClaudeStreamingOptions` 新增 `hermesModel`，两处 spawn 点与可视化终端 shell 分支（带引号，防 `zai_glm-5.3-flash[1M]` 方括号名被 shell 展开）全部透传；`QueuedTask` 增加 `hermesModel`，排队回放不丢选择。
+  - `buildHermesArgs()` 新增 `model` 参数追加 `-m`；`ClaudeExecutionOptions`/`ClaudeStreamingOptions` 新增 `hermesModel`，两处 spawn 点与可视化终端 shell 分支全部透传；`QueuedTask` 增加 `hermesModel`，排队回放不丢选择。
+  - review 修正：模型选择值读入/转换处经白名单校验（`provider/model` 字符集，杜绝引号/`$`/反引号等字符进入可视化终端的 bash 脚本字符串）；`package-lock.json` 同步 `yaml` 依赖（`npm ci` 干净安装可通过）。
   - 下拉首项「默认（glm-5.3 @ zai）」= 不传 `-m` 跟随 Hermes 配置；清单跟随当前 profile 切换自动刷新；已选模型不在当前 profile 清单时保留回显并照传（标注「当前 profile 未提供」），由 Hermes 报错可见而非静默清空。仅影响 Hermes 后端，claude/codebuddy 无感。
 - **Hermes Profile 动态选择器**：新增「选择 Hermes Profile」命令（select-profile），动态扫描 `~/.hermes/profiles/` 列出所有 profile（含 description 与 skill 数），回车即切换；LocalStorage 持久化，后续新增 bot（新建 profile 目录）自动出现在列表中，无需改代码。
   - 主界面 ActionPanel 新增「Hermes Profile：当前值」指示（`Cmd+Shift+P` 跳转选择器）；当前选中的 profile 显示 ✓。
@@ -34,7 +35,7 @@
   - 连带清理：`archive/261016_CLC-040-C波/skills-{old,new}/code-video` 是指向活动目录的**软链**而非冻结副本，Hermes 的 `os.walk(followlinks=True)` 会把它们当独立技能收进来，造成 3 份同名 code-video。两个软链已删除（只删链接，目标目录未动）。复扫：60 技能、零同名冲突、archive 内零残留。
 - **Hermes 后端改用 `-s` 原生预加载技能（可寻址时），否则回退全文嵌入**：无头路径 `-q --oneshot` 下 Hermes 不展开 `/skill` 斜杠命令，扩展历来把 SKILL.md 全文嵌进 query。但 Hermes 另有无头可用的原生方式 `-s <name>`：它按自身索引解析名字、把技能写进 system prompt，并附带技能目录、`references/ scripts/` 支撑文件清单与 `config.yaml` 解析值——比裸嵌全文完整（裸嵌版连目录都没告诉模型）。
   - 新增 `src/utils/hermesSkills.ts`：`canPreloadHermesSkill()` 解析 `hermes skills list` 判断名字能否被 Hermes **唯一**解析。表格名字列会被截断成 `…`，这类行不算精确匹配；若截断行的可见前缀与查询名相同（历史快照导致的同名多份），保守判为不可寻址。探测结果按 (hermesBin, projectDir, HERMES_HOME) 缓存 10 分钟；探测失败不缓存，避免把一次失败固化成十分钟的「回退嵌入」。`hermes skills inspect` 不可用——它查注册表而非本地树（35s 且查不到本地技能）。
-  - `claude.ts` 的 `buildHermesArgs()` 新增 `preloadSkillName`，命中时追加 `-s <name>` 并跳过全文嵌入；两个 spawn 点（`executeClaudeCommand` / `executeClaudeStreaming`）在 `return new Promise` **之前**完成决策。跑失败再回退会二次 spawn，写出两条 `executing` 事件，既污染执行次数统计也会让 PID 侦测拿旧进程误判——这是硬约束。
+  - `claude.ts` 的 `buildHermesArgs()` 新增 `preloadSkillName`，命中时追加 `-s <name>` 并跳过全文嵌入；两个 spawn 点（`executeClaudeCommand` / `executeClaudeStreaming`）在 `return new Promise` **之前**完成决策。跑失败再回退会二次 spawn，写出两条 `executing` 事件，既污染执行次数统计也会让 PID 侦测拿旧进程误判——这是硬约束。review 修正：表格内同名多份的技能视为不可寻址（回退全文嵌入），防 `-s` Ambiguous 直接失败。
   - 实测（profile `info-assistant`）：`-s code-livephoto` 通过解析、直达模型调用；`-s <不存在的名字>` 立即 `Unknown skill(s)` 退出，两种失败模式可区分。解析器对真实 `skills list` 输出：57 个精确名 / 2 个截断行，`code-livephoto`、`tingwu-asr`、`pdf-processor` 走 `-s`，`code-video`（同级目录未装进 profile）与不存在名回退嵌入。
 - **清掉 Hermes 技能树内的历史快照 SKILL.md**：`private-skills/code-livephoto/archive` 下 5 份历史 SKILL.md 会被 Hermes 的 `os.walk` 全部收成独立技能，导致 `-s code-livephoto` 报 Ambiguous、`code-video` 假命中归档旧快照。其中 4 份与 git 提交逐字节相同（`176a80d2…`=`3794f054f`、`be68834d…`=`18ff3cb66`、`7a5113cb…`=`e3c2fb8ee`）已删；唯一不在 git 的审计快照 `7a19a3f1…` 改名保留为 `SKILL.md.audit-snapshot`。技能树复扫：59 个技能、archive 内 0 残留、无同名冲突。**命名约束**：技能目录内除 `references/ templates/ assets/ scripts/` 四个支持目录外，任何地方都不能再有 SKILL.md。
 - **CodeBuddy 后端适配（无头模式）**：执行后端不再局限于 Claude Code，可在 Raycast 偏好中切换默认后端，也可在插件 UI 中临时切换为 CodeBuddy CLI。
@@ -62,7 +63,7 @@
 ### 修复 (Fixed)
 
 - **技能列表使用次数不更新 / 看起来不按使用频次排序**：排序比较器本身（置顶 > 新 > 使用次数 > 名称）没有问题，用真实数据重放顺序正确；问题出在喂给它的次数。根因两层：
-  - **`stats.json` 自 2026-08-12 起再未写入**：`recordExecution` 只在 `await executeClaudeCommand(...)` 返回后调用，而无头模式一跑数分钟，用户中途关掉 Raycast 窗口即终止扩展进程，await 永不返回、统计永不落账；之后 `status.ts` 的 PID 侦测只把 `completed/failed` 补写进 JSONL，不补 stats。列表显示的次数全靠 JSONL `executing` 事件兜底（`max(stats, log)`），状态页"累计执行 N 次"则一直停在 8 月。修复：`extractRunInfo` 在两处 PID 侦测补写点同步调用 `recordExecution(statsKeyForCmd(cmd), …)`——这条路径只在没有 completed/failed 事件时触发，恰好等价于"扩展侧记账被漏掉"，不会与正常路径重复计数；自由指令统一归入 `free-command`，与 `commands.tsx` 口径一致。
+  - **`stats.json` 自 2026-08-12 起再未写入**：`recordExecution` 只在 `await executeClaudeCommand(...)` 返回后调用，而无头模式一跑数分钟，用户中途关掉 Raycast 窗口即终止扩展进程，await 永不返回、统计永不落账；之后 `status.ts` 的 PID 侦测只把 `completed/failed` 补写进 JSONL，不补 stats。列表显示的次数全靠 JSONL `executing` 事件兜底（`max(stats, log)`），状态页"累计执行 N 次"则一直停在 8 月。修复：`extractRunInfo` 在两处 PID 侦测补写点同步调用 `recordExecution(statsKeyForCmd(cmd), …)`——这条路径只在没有 completed/failed 事件时触发，恰好等价于"扩展侧记账被漏掉"，不会与正常路径重复计数；自由指令统一归入 `free-command`，与 `commands.tsx` 口径一致。review 修正：两处补记点写终态事件前重读该 runId（commands 与 status 双进程轮询的窄窗内已由对方补记则让位），防跨进程双计。
   - **三层缓存叠加导致执行刚结束时刷新无效**：`skillsCache` 10s + `logCountCache` 5s，而 `recordExecution` 只失效 `statsCache`，`finally` 里紧随的 `loadSkills()` 直接吐回旧排序。修复：`invalidateSkillsCache()` 连带失效 stats 与 log 两个缓存；`executeSkill` / `executeFreeCommand` / 队列执行器三条 `finally` 路径在 `loadSkills()` 前调用它（队列路径此前根本不刷新列表，一并补上）。
   - 附带：`extractCommandName` 的正则从 `[a-zA-Z0-9-]+` 放宽为 `[^\s"']+`，否则含下划线或中文的技能名会被截断导致计数永远为 0。
 - **"描述太长的技能右侧不显示次数"**：实际是两件事叠加——描述最长的那批（xlsx 943 字、docx 799、ui-ux-pro-max 732、ego-browser 610……）恰好都是从未通过扩展执行过的技能（0 次），而旧代码 `executions > 0` 才渲染次数，于是整行看不到数字；反例 video-screenshot 描述 365 字照样显示 5。修复：次数 accessory **始终渲染**（0 用 `Color.SecondaryText` 弱化，tooltip "累计执行 N 次"），排序一眼可读；同时 subtitle 截断到 80 字并把全文放 tooltip，避免近千字 frontmatter description 把右侧 accessories 挤到看不见。
@@ -371,6 +372,7 @@
 ## [0.1.0] - 2026-01-10
 
 ### 新增 (Added)
+
 - 初始版本的 AutoWeave Raycast 扩展
 - 支持从 Finder 中选中文件进行处理
 - 实现动态命令列表显示
@@ -390,6 +392,7 @@
 ## 格式说明
 
 变更类型：
+
 - **新增 (Added)**：新功能
 - **变更 (Changed)**：现有功能的变更
 - **弃用 (Deprecated)**：即将移除的功能

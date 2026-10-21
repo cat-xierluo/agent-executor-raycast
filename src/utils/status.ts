@@ -445,22 +445,32 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
         duration =
           actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
 
-        // 写入completed事件到JSONL,避免下次再计算
-        writeJsonLog("completed", "success", runId, {
-          duration: duration,
-          pid: pid,
-          target: targetFullPath,
-          work_dir: targetDirectory,
-          cmd: command,
-          output: actualOutput,
-        });
-        // 走到这里说明扩展进程在 await 返回前已被 Raycast 终止（无头模式关窗），
-        // commands.tsx 里的 recordExecution 从未执行，统计只能在此补记
-        recordExecution(
-          statsKeyForCmd(command),
-          true,
-          Math.round(duration * 1000),
+        // 跨进程窄窗防御：commands 与 status 两个进程可能先后轮询到同一 runId，
+        // 都在对方写入终态事件前进入本分支 → recordExecution 双计。写前重读该
+        // runId，已有终态即让位（首个写入者胜出，残余窗口为微秒级）。
+        const alreadyTerminal = readLogEntries().some(
+          (e) =>
+            e.runId === runId &&
+            (e.event === "completed" || e.event === "failed"),
         );
+        if (!alreadyTerminal) {
+          // 写入completed事件到JSONL,避免下次再计算
+          writeJsonLog("completed", "success", runId, {
+            duration: duration,
+            pid: pid,
+            target: targetFullPath,
+            work_dir: targetDirectory,
+            cmd: command,
+            output: actualOutput,
+          });
+          // 走到这里说明扩展进程在 await 返回前已被 Raycast 终止（无头模式关窗），
+          // commands.tsx 里的 recordExecution 从未执行，统计只能在此补记
+          recordExecution(
+            statsKeyForCmd(command),
+            true,
+            Math.round(duration * 1000),
+          );
+        }
       } else if (processInfo.status === "failed") {
         status = "failed";
         exitCode = -2; // 表示基于检测判定为失败
@@ -502,22 +512,30 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
         duration =
           actualDuration ?? (endTime.getTime() - startTime.getTime()) / 1000;
 
-        // 写入failed事件到JSONL,避免下次再计算
-        writeJsonLog("failed", "error", runId, {
-          duration: duration,
-          exit_code: exitCode,
-          pid: pid,
-          target: targetFullPath,
-          work_dir: targetDirectory,
-          cmd: command,
-          output: actualOutput,
-          reason: "pid_detection",
-        });
-        recordExecution(
-          statsKeyForCmd(command),
-          false,
-          Math.round(duration * 1000),
+        // 同上的跨进程双计防御：写终态事件与补记账前重读该 runId
+        const alreadyTerminal = readLogEntries().some(
+          (e) =>
+            e.runId === runId &&
+            (e.event === "completed" || e.event === "failed"),
         );
+        if (!alreadyTerminal) {
+          // 写入failed事件到JSONL,避免下次再计算
+          writeJsonLog("failed", "error", runId, {
+            duration: duration,
+            exit_code: exitCode,
+            pid: pid,
+            target: targetFullPath,
+            work_dir: targetDirectory,
+            cmd: command,
+            output: actualOutput,
+            reason: "pid_detection",
+          });
+          recordExecution(
+            statsKeyForCmd(command),
+            false,
+            Math.round(duration * 1000),
+          );
+        }
       } else {
         status = "running";
         console.log(`[extractRunInfo] 检测到PID ${pid} 仍在运行`);

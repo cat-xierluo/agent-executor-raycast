@@ -254,11 +254,11 @@ export function parseHermesOutput(stdout: string): {
  * - --oneshot + -Q：程序化单次执行，只输出最终回复
  * - --pass-session-id：输出 session_id 行，供恢复对话
  * - --in 指定工作目录：Hermes 按自身规则发现 .hermes/skills、.agents/skills
- *
- * 不用 `-s` 预加载：Hermes 的技能索引只覆盖自己的目录体系（~/.hermes/skills/<分类>/<技能>、
- * 项目 .hermes/skills、.agents/skills），不扫 Claude 布局的 .claude/skills——Raycast 扫出的
- * 技能名传 `-s` 会得到 "Unknown skill(s)" 退出码 1（实测）。因此由调用方把 SKILL.md 全文
- * 读出后作为 skillContent 传入，直接嵌入 query，语义与 Claude Code 的 Skill 工具注入对齐。
+ * - preloadSkillName：可寻址时走 -s 原生预加载（技能正文由 Hermes 写进
+ *   system prompt，自带目录/支撑文件清单），见 resolveHermesPreload；
+ *   不可寻址（不在 Hermes 索引/同名多份/截断行）回退 skillContent 全文嵌入
+ * - model：显式模型（provider/model），经 hermesModel.ts 白名单校验；
+ *   空则跟随 config.yaml 的 model.default
  */
 export function buildHermesArgs(
   prompt: string,
@@ -883,7 +883,8 @@ export async function executeClaudeCommand(
         // Hermes 后端：无 --print/--output-format，走 chat -q 参数体系；
         // 可视化模式用户在场，不嵌 skill 正文与无头前置指令，靠 TTY 交互。
         // --source cli 让会话在桌面端可见（Hermes 默认把 oneshot 会话隐藏）。
-        // -m 双引号包裹：模型名可能含方括号（zai_glm-5.3-flash[1M]），防 shell 展开。
+        // -m 双引号包裹防方括号通配（zai_glm-5.3-flash[1M]）；值本身已在
+        // hermesModel.ts 白名单校验（无引号/$/反引号等可注入字符），双保险。
         const isHermes = backend === "hermes";
         const runCmd = isHermes
           ? `"${claudeBin}" chat -q "$PROMPT" --source cli${hermesModel ? ` -m "${hermesModel}"` : ""}`

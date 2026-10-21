@@ -52,6 +52,12 @@ export function parseSkillsList(stdout: string): HermesSkillIndex {
       truncatedPrefixes.push(name.slice(0, -1));
       continue;
     }
+    // 同名多份（如误留的 archive 快照）会让 -s 报 Ambiguous 直接失败，
+    // 比回退嵌入更糟——从可寻址集合里剔除，走全文嵌入兜底
+    if (exactNames.has(name)) {
+      exactNames.delete(name);
+      continue;
+    }
     exactNames.add(name);
   }
 
