@@ -11,6 +11,7 @@ import {
 } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 import { canPreloadHermesSkill } from "./hermesSkills";
+import { normalizeHermesModel } from "./hermesModel";
 
 /** 执行后端：Claude Code、CodeBuddy（CLI 兼容）或 Hermes（独立参数体系） */
 export type AgentBackend = "claude" | "codebuddy" | "hermes";
@@ -556,7 +557,6 @@ export async function executeClaudeStreaming(
     codebuddyBin: customCodebuddyBin,
     hermesBin: customHermesBin,
     hermesProfileHome,
-    hermesModel,
     backend,
     skillContent,
     prompt,
@@ -565,6 +565,10 @@ export async function executeClaudeStreaming(
     onChunk,
     logger,
   } = options;
+  // 消费点统一过白名单：排队回放（task-queue.json）等旁路入口的值不经
+  // hermesModel.ts 读入口，这里兜底校验——可视化终端分支会把它插进 bash 脚本字符串
+  const hermesModel =
+    normalizeHermesModel(options.hermesModel ?? "") || undefined;
   const claudeBin = resolveBackendBin(
     backend,
     customClaudeBin,
@@ -847,13 +851,15 @@ export async function executeClaudeCommand(
     codebuddyBin: customCodebuddyBin,
     hermesBin: customHermesBin,
     hermesProfileHome,
-    hermesModel,
     backend,
     skillContent,
     prompt,
     headlessMode = true,
     onPid,
   } = options;
+  // 同 executeClaudeStreaming：消费点白名单兜底（排队回放旁路入口）
+  const hermesModel =
+    normalizeHermesModel(options.hermesModel ?? "") || undefined;
   const claudeBin = resolveBackendBin(
     backend,
     customClaudeBin,

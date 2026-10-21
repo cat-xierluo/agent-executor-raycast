@@ -36,6 +36,9 @@ const LIST_TIMEOUT_MS = 20 * 1000;
 export function parseSkillsList(stdout: string): HermesSkillIndex {
   const exactNames = new Set<string>();
   const truncatedPrefixes: string[] = [];
+  // 墓碑集合：剔除过的重名不再按「首次出现」加回（第三次出现时 exactNames
+  // 已不含该名，没有墓碑会误判回可寻址——历史事故正是 3 份同名 code-video）
+  const dupNames = new Set<string>();
 
   for (const line of stdout.split("\n")) {
     if (!line.includes("│")) continue;
@@ -54,8 +57,9 @@ export function parseSkillsList(stdout: string): HermesSkillIndex {
     }
     // 同名多份（如误留的 archive 快照）会让 -s 报 Ambiguous 直接失败，
     // 比回退嵌入更糟——从可寻址集合里剔除，走全文嵌入兜底
-    if (exactNames.has(name)) {
+    if (exactNames.has(name) || dupNames.has(name)) {
       exactNames.delete(name);
+      dupNames.add(name);
       continue;
     }
     exactNames.add(name);
