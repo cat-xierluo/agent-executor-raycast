@@ -186,6 +186,7 @@ export default function CommandList(
   const [hermesModelChoice, setHermesModelChoice] = useState<string>(
     () => getSelectedHermesModelSync() || DEFAULT_MODEL_CHOICE,
   );
+  const modelSelectionChanged = useRef(false);
   const [modelCatalog, setModelCatalog] = useState<HermesModelCatalog | null>(
     () => {
       // 与技能扫描同源：运行时选中的 profile 优先，偏好 hermesProfile 兜底
@@ -314,15 +315,21 @@ export default function CommandList(
 
   // 模型选择同款迁移：文件快路径缺失但 LocalStorage 有旧值 → 修正 state（值已回写文件）
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       try {
         const saved = await getSelectedHermesModel();
         const choice = saved || DEFAULT_MODEL_CHOICE;
-        if (choice !== hermesModelChoice) setHermesModelChoice(choice);
+        if (!cancelled && !modelSelectionChanged.current) {
+          setHermesModelChoice(choice);
+        }
       } catch {
         // 保持同步初始值
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function loadRunningCount() {
@@ -558,9 +565,8 @@ export default function CommandList(
 
   /**
    * 执行自由指令（直接输入prompt，不走skill）
-   * @param backendOverride 可选：覆盖当前选中的执行后端
    */
-  async function executeFreeCommand(backendOverride?: AgentBackend) {
+  async function executeFreeCommand() {
     if (processingCommand.some((c) => c.name === "free-command")) return;
 
     // 解析搜索栏：分离 URL 与剩余备注
@@ -637,7 +643,7 @@ export default function CommandList(
 
     const executionStartTime = Date.now();
     const config = getConfig();
-    const runtimeBackend = backendOverride ?? selectedBackend;
+    const runtimeBackend = selectedBackend;
 
     try {
       const projectDir = config.projectDirs[0];
@@ -1162,12 +1168,22 @@ export default function CommandList(
       onSearchTextChange={setNote}
       searchBarAccessory={
         <List.Dropdown
-          tooltip="Hermes 模型（选定后所有执行自动以 -m 传给后端）"
+          tooltip="Hermes 模型（自动记住选择，后续执行持续使用，直到手动更换）"
           value={hermesModelChoice}
           onChange={(v) => {
+            if (v === hermesModelChoice) return;
+            modelSelectionChanged.current = true;
             setHermesModelChoice(v);
             // 即时双写持久化；执行路径只读内存态，无需再确认
-            void persistSelectedHermesModel(dropdownValueToModel(v) ?? "");
+            void persistSelectedHermesModel(
+              dropdownValueToModel(v) ?? "",
+            ).catch(() =>
+              showToast({
+                style: Toast.Style.Failure,
+                title: "模型选择保存失败",
+                message: "本次选择仍生效，请重新选择后重试保存",
+              }),
+            );
           }}
         >
           <List.Dropdown.Item
@@ -1416,14 +1432,14 @@ export default function CommandList(
                   <ActionPanel>
                     <Action
                       title="执行自由指令"
-                      onAction={executeFreeCommand}
+                      onAction={() => executeFreeCommand()}
                       icon={Icon.Play}
                       shortcut={{ modifiers: ["cmd", "shift"], key: "enter" }}
                     />
                     {searchTitleText && (
                       <Action
                         title={`执行：${searchTitleText.substring(0, 30)}${searchTitleText.length > 30 ? "..." : ""}`}
-                        onAction={executeFreeCommand}
+                        onAction={() => executeFreeCommand()}
                         icon={Icon.Play}
                       />
                     )}

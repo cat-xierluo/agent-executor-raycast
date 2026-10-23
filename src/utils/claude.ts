@@ -11,7 +11,7 @@ import {
 } from "fs";
 import { getPreferenceValues } from "@raycast/api";
 import { canPreloadHermesSkill } from "./hermesSkills";
-import { normalizeHermesModel } from "./hermesModel";
+import { buildHermesModelArgs, normalizeHermesModel } from "./hermesModel";
 
 /** 执行后端：Claude Code、CodeBuddy（CLI 兼容）或 Hermes（独立参数体系） */
 export type AgentBackend = "claude" | "codebuddy" | "hermes";
@@ -300,9 +300,8 @@ export function buildHermesArgs(
     // 预加载技能（-s）：Hermes 解析该名字后把技能写进 system prompt。
     // 必须在 spawn 前决定好——跑失败再回退会二次 spawn，写出两条 executing 事件。
     ...(preloadSkillName ? ["-s", preloadSkillName] : []),
-    // 显式模型（-m provider/model）：空 = 跟随 config.yaml 的 model.default。
-    // provider/model 形态见 hermes chat --help 示例（anthropic/claude-sonnet-4）。
-    ...(model ? ["-m", model] : []),
+    // provider 与模型分别传递，保留网关模型名自身的斜杠。
+    ...buildHermesModelArgs(model),
   ];
 }
 
@@ -892,8 +891,11 @@ export async function executeClaudeCommand(
         // -m 双引号包裹防方括号通配（zai_glm-5.3-flash[1M]）；值本身已在
         // hermesModel.ts 白名单校验（无引号/$/反引号等可注入字符），双保险。
         const isHermes = backend === "hermes";
+        const modelArgs = buildHermesModelArgs(hermesModel)
+          .map((arg) => `"${arg}"`)
+          .join(" ");
         const runCmd = isHermes
-          ? `"${claudeBin}" chat -q "$PROMPT" --source cli${hermesModel ? ` -m "${hermesModel}"` : ""}`
+          ? `"${claudeBin}" chat -q "$PROMPT" --source cli${modelArgs ? ` ${modelArgs}` : ""}`
           : `"${claudeBin}" --print --dangerously-skip-permissions --output-format json "$PROMPT"`;
 
         const scriptContent = `#!/bin/bash

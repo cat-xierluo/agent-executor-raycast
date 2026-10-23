@@ -1,6 +1,6 @@
 # Agent Executor 项目路线图
 
-> Last updated: 2026-10-20
+> Last updated: 2026-10-23
 > 本文是 Agent Executor Raycast Extension 的发展路线图，记录已完成功能和未来计划。
 
 ## 项目愿景
@@ -28,7 +28,7 @@
 | **阶段二：DevonThink 集成** | 支持 DevonThink 文件操作           | 4/4 完成   | 🟢 已完成 |
 | **阶段三：日志与监控**      | 基础日志系统和状态监控             | 10/10 完成 | 🟢 已完成 |
 | **阶段四：关键修复**        | 修复任务状态读取和监控系统         | 8/8 完成   | 🟢 已完成 |
-| **阶段五：体验优化**        | 提升用户体验和稳定性               | 5/9 完成   | 🟡 进行中 |
+| **阶段五：体验优化**        | 提升用户体验和稳定性               | 6 项已完成 | 🟡 进行中 |
 
 ---
 
@@ -151,6 +151,7 @@
 | 任务队列与并发控制       | 新增队列模块，支持配置最大并发数，超限自动排队，队列持久化到磁盘                    | 🔴 高  | ✅   | 2026-05-01 |
 | 移除 5 分钟超时          | 移除 CLI 执行的超时限制，避免误杀长任务，改为依赖进程自然退出                       | 🟡 中  | ✅   | 2026-05-01 |
 | 扩展入口与执行稳定性修复 | 修复 Raycast 命令图标、manifest checkbox 字段、后台执行转义、PID 取消和状态误判问题 | 🔴 高  | ✅   | 2026-05-20 |
+| Hermes 模型选择与记忆修复 | 支持含多段斜杠的模型名，明确传递 provider，重开保留选择并避免旧值覆盖 | 🔴 高 | ✅ | 2026-10-23 |
 
 ### 进行中任务
 
@@ -354,6 +355,14 @@ const child = spawn("/bin/bash", ["-c", bashCommand], {
 ---
 
 ## 进度日志
+
+### 2026-10-23
+
+- **用户反馈闭环：模型选择不生效且无法记忆**。真实选择值 `magpie/minimax-code/MiniMax-M3.1-Flash` 含两个 `/`，旧白名单将其清空，导致保存空值且执行不带模型参数，继续使用默认 GLM。现允许安全的多段模型路径，以首个 `/` 拆开 provider 和完整模型名；所有执行入口共用参数转换。空文件表示明确跟随默认，旧存储仅在文件缺失时迁移；迁移和快速切换不再覆盖新选择。
+- **插件内执行复核**：首次从自由指令按钮运行测试，虽然返回成功，却产生 Claude 会话 `c44829d9-dc3c-4b56-82b4-a6978b36e8a0`。已移除自由指令未使用的后端覆盖参数，并显式包裹按钮回调，确保使用当前所选后端；增加真实自由指令函数的回调参数回归测试。
+- **修复后插件内实测通过**：页面保持 MiniMax 选择，运行无文件的自由指令后返回 `RAYCAST_HERMES_MINIMAX_OK`；扩展日志记录成功，会话 `20261023_173953_6e7a7d` 在 Hermes profile 数据库中的模型为 `minimax-code/MiniMax-M3.1-Flash`，来源为 `cli`。模型记忆与页面到 Hermes 的执行链均已核验；真实终端窗口和排队后回放仅做参数级验证。
+- **验收证据**：`node scripts/test-hermes-model.cjs` 覆盖规范化、持久化、默认与迁移竞态；`node scripts/test-hermes-execution.cjs` 覆盖后台/流式实际 spawn 参数、默认参数及终端脚本。`npm run typescript`、`npm run build` 通过，`npm run dev` 已成功构建并重载。Raycast 实际下拉选中 MiniMax，退出命令并重新进入仍显示 `minimax-code/MiniMax-M3.1-Flash`，同步文件保存完整选择值。真实 Hermes 调用 exit 0 返回 `MODEL_SELECTION_OK`，只读核验会话 `20261023_170145_97cd46` 的模型字段为 `minimax-code/MiniMax-M3.1-Flash`。
+- **检查限制**：全量 `npm run lint` 未通过，原因包括未修改的 `package.json` 作者 `maoking` 在 Raycast 用户接口返回 404，以及 `select-profile.tsx`、`devonthink.ts`、`hermesProfile.ts`、`skills.ts` 的既有格式问题；ESLint 无错误，保留既有快捷键警告。命令日志保存在隔离 worktree 的 `scripts/261023 *.log`，不提交运行日志。
 
 ### 2026-10-21
 
