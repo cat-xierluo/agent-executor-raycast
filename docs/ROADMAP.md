@@ -174,9 +174,9 @@
 - 真实调用：`RAYCAST_DSH_NATIVE_OK`（session `session-d85dda4c-5386-4220-8a9e-b2bc3c81bf65`）；Raycast 最小 `PATH=/usr/bin:/bin` 复测返回 `RAYCAST_DSH_PATH_OK`（session `session-17374311-a4ea-4c4b-8d8f-11860223abfe`）。
 - Desktop：刷新页面后，`只回复两个字：OK，不要调用任何工具` 出现在 `legal-skills / 未分组`；打开后可见原问题、`OK` 回复与“已完成，用时 2 秒”。CLI `0.2.1-rc.2`，Desktop `0.2.1-rc.3`。
 - 回归：`node scripts/test-deepseek.cjs`、`node scripts/test-hermes-execution.cjs`、`node scripts/test-hermes-model.cjs`、`npm run typescript`、`npm run build` 通过；`npm run dev` 已触发 Raycast 开发版重载。
-- UI：开发版中选择 DSH 后显示 `Agent Executor · DeepSeek Harness`，DSH 技能扫描为 39 项；状态页可见历史。修复 PATH 后未再次完整走完 Raycast 内自由指令（此前一次失败已定位并修复，用同最小 PATH 环境复测适配器通过），该项标记 `NOT_VERIFIED`。
+- UI：主目录版本重载后显示 `Agent Executor · DeepSeek Harness`，DSH 技能扫描为 39 项；在 Raycast 内选择“自由指令”实际执行成功，状态页显示成功、11 秒、PID 2331、退出码 0 与完整 Session ID。
 - 边界：外部 headless 进程不会实时推送进度到已连接 Desktop；需刷新/重连后在相同工作区查看。`dsh://open` 只能聚焦 Desktop，不能直达指定会话。可视化 Terminal 模式不支持 DSH。
-- 交付状态：候选已提交在独立分支 `feat/deepseek-harness`；主目录仍固定 main 且保留原有未提交技能改动，尚未采用本候选。
+- 交付状态：候选 `86d5ca2`/`c53a1c5` 已按窄采用流程进入 main（`b8c3827`，超时声明修复 `24de049`）；主目录原有未提交技能改动保持原样。主目录实测 `RAYCAST_UI_DSH_OK` 成功（session `session-43bddca5-0655-4792-99e6-1090765e1244`，11 秒，exit 0），状态页可见 Session ID、退出码和复制动作。
 
 ### 进行中任务
 
