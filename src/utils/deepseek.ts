@@ -250,7 +250,6 @@ export async function executeDsh(
       let buffer = "";
       let stderr = "";
       let settled = false;
-      let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
       const onChunk = "onChunk" in options ? options.onChunk : undefined;
       logger?.startRealtimeLogging();
       const child = spawn(binary, args, {
@@ -303,7 +302,7 @@ export async function executeDsh(
         }
       };
       if (child.pid) options.onPid?.(child.pid);
-      timeoutTimer = setTimeout(
+      const timeoutTimer = setTimeout(
         () => {
           try {
             child.kill("SIGKILL");
