@@ -2,6 +2,21 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [2026-10-29]
+
+### 新增 (Added)
+
+- **DeepSeek Harness (DSH) 执行后端**：执行后端新增 DSH，可在设置、主界面下拉或 `Cmd+Shift+B` 轮换中选择并跨次记忆。后台与流式执行走 `dsh --profile headless --json`，解析会话 ID、工具进度、思考/文本事件、最终回复与非零失败；技能正文经 stdin 注入，不受 argv 长度与 shell 转义影响。
+  - 新增 `src/utils/deepseek.ts`：从所选 `~/.dsh/profiles/<desktop|web|next>/cordis.patch.yml` 只复制模型与搜索配置到临时 headless patch，同时启用已保存凭据、`danger-full-access` 与免审批；不复制 UI 插件树，也不在日志输出凭据。
+  - DSH 原生会话落盘到同一 `$DSH_HOME/sessions`；状态页记录并显示 Session ID，支持复制，另提供 `dsh://open` 打开 Desktop。实测刷新 Desktop 后可在对应工作区回看无头会话的原问题、回复与完成状态；外部进程不会实时注入已连接 Desktop，需刷新/重连后查看。
+  - 技能扫描支持项目 `.dsh/skills`、`.agents/skills`、`.claude/skills` 及用户级 `.dsh/skills`、`.agents/skills`；排队任务透传 DSH 参数并登记 PID，可取消。
+  - 自动把 DSH 启动器所在 Node 目录补进子进程 `PATH`，修复 Raycast 最小环境下 `env: node: No such file or directory`。
+  - 当前 DSH 后端不支持弹 Terminal 的可视化模式，会明确报错并提示改用后台/流式模式。
+
+### 修复 (Fixed)
+
+- **DSH 完成判定**：按真实 `turn_end.reason.kind` 与 final 事件判定成功，避免把模型已回答但进程异常/缺少 final 的运行误判为成功；补充 30 分钟超时、失败路径流式回显与缺失模型配置前置报错。
+
 ## [2026-10-23]
 
 ### 修复 (Fixed)

@@ -1,4 +1,5 @@
 import { spawn, execSync } from "child_process";
+import { executeDsh } from "./deepseek";
 import { basename, dirname, join } from "path";
 import { homedir, tmpdir } from "os";
 import {
@@ -14,7 +15,7 @@ import { canPreloadHermesSkill } from "./hermesSkills";
 import { buildHermesModelArgs, normalizeHermesModel } from "./hermesModel";
 
 /** 执行后端：Claude Code、CodeBuddy（CLI 兼容）或 Hermes（独立参数体系） */
-export type AgentBackend = "claude" | "codebuddy" | "hermes";
+export type AgentBackend = "claude" | "codebuddy" | "hermes" | "dsh";
 
 export interface AgentExecutorConfig {
   projectDirs: string[]; // 扫描 .claude/commands/ 目录
@@ -22,6 +23,8 @@ export interface AgentExecutorConfig {
   claudeBin: string;
   codebuddyBin: string;
   hermesBin: string;
+  dshBin: string;
+  dshConfigProfile: string;
   hermesProfile: string; // Hermes profile 名称；空 = 主 Hermes
   hermesProfileHome?: string; // 解析后的 HERMES_HOME 绝对路径；执行时注入到子进程 env
   backend: AgentBackend;
@@ -39,6 +42,8 @@ export interface Preferences {
   claudeBin?: string;
   codebuddyBin?: string;
   hermesBin?: string;
+  dshBin?: string;
+  dshConfigProfile?: string;
   hermesProfile?: string; // Hermes profile 名；空 = 主 profile（~/.hermes）；填了则切到 ~/.hermes/profiles/<name>/
   headlessMode?: boolean;
   enableDefaultSkills?: boolean; // 新增：是否启用默认 ~/.claude/skills/
@@ -76,7 +81,8 @@ export function isValidProjectDir(dir: string): boolean {
   return (
     existsSync(join(dir, ".claude/skills")) ||
     existsSync(join(dir, ".hermes/skills")) ||
-    existsSync(join(dir, ".agents/skills"))
+    existsSync(join(dir, ".agents/skills")) ||
+    existsSync(join(dir, ".dsh/skills"))
   );
 }
 
@@ -161,7 +167,9 @@ export function loadConfig(): AgentExecutorConfig {
 
   // 执行后端默认 claude（向后兼容）
   const backend: AgentBackend =
-    prefs.backend === "codebuddy" || prefs.backend === "hermes"
+    prefs.backend === "codebuddy" ||
+    prefs.backend === "hermes" ||
+    prefs.backend === "dsh"
       ? prefs.backend
       : "claude";
 
@@ -188,6 +196,8 @@ export function loadConfig(): AgentExecutorConfig {
     claudeBin,
     codebuddyBin,
     hermesBin,
+    dshBin: (prefs.dshBin || "~/.local/bin/dsh").replace(/^~/, homedir()),
+    dshConfigProfile: (prefs.dshConfigProfile || "desktop").trim(),
     hermesProfile,
     hermesProfileHome,
     backend,
@@ -376,6 +386,8 @@ export interface ClaudeExecutionOptions {
   claudeBin?: string;
   codebuddyBin?: string;
   hermesBin?: string;
+  dshBin?: string;
+  dshConfigProfile?: string;
   hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
   hermesModel?: string; // Hermes 后端：显式模型（provider/model）；空 = 跟随 config.yaml 默认
   backend?: AgentBackend;
@@ -411,6 +423,8 @@ export interface ClaudeStreamingOptions {
   claudeBin?: string;
   codebuddyBin?: string;
   hermesBin?: string;
+  dshBin?: string;
+  dshConfigProfile?: string;
   hermesProfileHome?: string; // Hermes 子进程 HERMES_HOME；空 = 主 Hermes
   hermesModel?: string; // Hermes 后端：显式模型（provider/model）；空 = 跟随 config.yaml 默认
   backend?: AgentBackend;
@@ -423,6 +437,7 @@ export interface ClaudeStreamingOptions {
     startRealtimeLogging: () => void;
     logRealtime: (chunk: string) => void;
     logExecuting?: (prompt: string, pid?: number) => void;
+    logSession?: (sessionId: string, backend: string) => void;
     logCompleted: (
       output: string,
       exitCode: number,
@@ -564,6 +579,22 @@ export async function executeClaudeStreaming(
     onChunk,
     logger,
   } = options;
+  if (backend === "dsh") {
+    if (!headlessMode) {
+      return {
+        success: false,
+        output: "流式输出仅支持 headless 模式",
+        exitCode: 1,
+        duration: 0,
+      };
+    }
+    return executeDsh(
+      options,
+      { ...process.env, ...getProjectEnv(projectDir) },
+      resolveHeadlessPreamble(),
+      logger,
+    );
+  }
   // 消费点统一过白名单：排队回放（task-queue.json）等旁路入口的值不经
   // hermesModel.ts 读入口，这里兜底校验——可视化终端分支会把它插进 bash 脚本字符串
   const hermesModel =
@@ -842,6 +873,7 @@ export async function executeClaudeCommand(
     startRealtimeLogging: () => void;
     logRealtime: (chunk: string) => void;
     logExecuting?: (prompt: string, pid?: number, outputFile?: string) => void;
+    logSession?: (sessionId: string, backend: string) => void;
   },
 ): Promise<ClaudeExecutionResult> {
   const {
@@ -856,6 +888,14 @@ export async function executeClaudeCommand(
     headlessMode = true,
     onPid,
   } = options;
+  if (backend === "dsh") {
+    return executeDsh(
+      options,
+      { ...process.env, ...getProjectEnv(projectDir) },
+      headlessMode ? resolveHeadlessPreamble() : "",
+      logger,
+    );
+  }
   // 同 executeClaudeStreaming：消费点白名单兜底（排队回放旁路入口）
   const hermesModel =
     normalizeHermesModel(options.hermesModel ?? "") || undefined;

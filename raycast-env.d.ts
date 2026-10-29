@@ -18,14 +18,18 @@ type ExtensionPreferences = {
   "projectDir4"?: string,
   /** 项目目录 5 - 第五个项目目录（可选） */
   "projectDir5"?: string,
-  /** 执行后端 - 选择用于执行技能的 Agent CLI（Claude Code、CodeBuddy 或 Hermes） */
-  "backend": "claude" | "codebuddy" | "hermes",
+  /** 执行后端 - 选择执行技能的 Agent CLI；也可用 Cmd+Shift+B 切换并记忆 */
+  "backend": "claude" | "codebuddy" | "hermes" | "dsh",
   /** Claude CLI 可执行文件路径 - 可选：指定 claude 命令的完整路径（默认：~/.local/bin/claude） */
   "claudeBin": string,
   /** CodeBuddy CLI 可执行文件路径 - 可选：指定 codebuddy 命令的完整路径（默认：~/.local/bin/codebuddy） */
   "codebuddyBin": string,
   /** Hermes CLI 可执行文件路径 - 可选：指定 hermes 命令的完整路径（默认：~/.local/bin/hermes） */
   "hermesBin": string,
+  /** DSH CLI 可执行文件路径 - DeepSeek Harness 官方 dsh 启动器（需支持 headless --json） */
+  "dshBin": string,
+  /** DSH 模型配置来源 - 从 ~/.dsh/profiles/<名称>/cordis.patch.yml 读取模型与搜索配置；默认 desktop，也可填 web 或 next。执行仍使用 headless profile，保存为 DSH 原生会话。 */
+  "dshConfigProfile": string,
   /** Hermes profile - 可选：指定 Hermes profile 名（如 info-assistant）。空 = 主 Hermes。profile 路径 = ~/.hermes/profiles/<name>，必须存在才生效。 */
   "hermesProfile": string,
   /** 后台运行模式 - 启用后命令在后台运行（无头模式）。禁用后将弹出终端窗口显示执行过程。 */

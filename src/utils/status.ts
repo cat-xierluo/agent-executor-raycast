@@ -232,6 +232,8 @@ export interface RunInfo {
   pid?: number;
   logPath: string;
   workDir?: string;
+  sessionId?: string;
+  backend?: string;
 }
 
 /**
@@ -273,6 +275,8 @@ export function readLogEntries(): LogEntry[] {
             pid: parsed.pid,
             output: parsed.output,
             outputFile: parsed.output_file, // 临时输出文件路径
+            sessionId: parsed.session_id,
+            backend: parsed.backend,
           };
         } catch {
           // 跳过无法解析的行
@@ -346,6 +350,7 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
   const executingEvent = sortedLogs.find((log) => log.event === "executing");
   const completedEvent = sortedLogs.find((log) => log.event === "completed");
   const failedEvent = sortedLogs.find((log) => log.event === "failed");
+  const sessionEvent = sortedLogs.find((log) => log.sessionId);
 
   if (!startedEvent) {
     return null;
@@ -356,6 +361,7 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
   const targetDirectory = startedEvent.workDir || "未知路径";
   const command = executingEvent?.cmd || startedEvent.cmd || "未知命令";
   const pid = executingEvent?.pid;
+  const isDsh = sessionEvent?.backend === "dsh";
 
   // 检查 target 是否是真正的文件路径（包含 / 并且以 . 开头有扩展名，或者是绝对路径）
   // 如果不是，说明这是命令名而不是文件路径
@@ -393,6 +399,10 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
     endTime = parseLocalTime(failedEvent.timestamp);
     exitCode = failedEvent.exitCode;
     duration = failedEvent.duration;
+  } else if (isDsh) {
+    // DSH terminal truth is the adapter's completed/failed event. A dead PID
+    // alone may be a poll between process exit and that event being written.
+    status = "running";
   } else {
     // 没有日志事件时，使用深度PID检测
     if (pid) {
@@ -560,6 +570,8 @@ function extractRunInfo(runId: string, logs: LogEntry[]): RunInfo | null {
     pid,
     logPath: join(RUNS_DIR, `${runId}.log`),
     workDir: directory,
+    sessionId: sessionEvent?.sessionId,
+    backend: sessionEvent?.backend,
   };
 }
 
@@ -706,6 +718,9 @@ export function clearAllHistory(): {
                 exit_code: entry.exitCode,
               }),
               ...(entry.pid !== undefined && { pid: entry.pid }),
+              ...(entry.sessionId && { session_id: entry.sessionId }),
+              ...(entry.backend && { backend: entry.backend }),
+              ...(entry.outputFile && { output_file: entry.outputFile }),
             });
           })
           .join("\n") + "\n";

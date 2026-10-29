@@ -161,7 +161,13 @@ export default function CommandList(
   function rotateBackend() {
     setSelectedBackend((b) => {
       const next: AgentBackend =
-        b === "claude" ? "codebuddy" : b === "codebuddy" ? "hermes" : "claude";
+        b === "claude"
+          ? "codebuddy"
+          : b === "codebuddy"
+            ? "hermes"
+            : b === "hermes"
+              ? "dsh"
+              : "claude";
       writeSelectedBackendSync(next);
       return next;
     });
@@ -210,7 +216,7 @@ export default function CommandList(
   // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy / Hermes 间轮换）
   const backendToggleAction = (
     <Action
-      title={`执行后端：${selectedBackend === "codebuddy" ? "CodeBuddy" : selectedBackend === "hermes" ? "Hermes" : "Claude Code"}`}
+      title={`执行后端：${selectedBackend === "dsh" ? "DeepSeek Harness" : selectedBackend === "codebuddy" ? "CodeBuddy" : selectedBackend === "hermes" ? "Hermes" : "Claude Code"}`}
       onAction={rotateBackend}
       icon={Icon.Switch}
       shortcut={{ modifiers: ["cmd", "shift"], key: "b" }}
@@ -371,12 +377,17 @@ export default function CommandList(
           claudeBin: task.claudeBin,
           codebuddyBin: task.codebuddyBin,
           hermesBin: task.hermesBin,
+          dshBin: task.dshBin,
+          dshConfigProfile: task.dshConfigProfile,
           hermesProfileHome: task.hermesProfileHome,
           hermesModel: task.hermesModel,
           backend: task.backend,
           skillContent,
           skillFile: task.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
           headlessMode: task.headlessMode,
+          onPid: (pid) => {
+            activePids.current[task.skillName] = pid;
+          },
         },
         logger,
       );
@@ -674,6 +685,8 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          dshBin: config.dshBin,
+          dshConfigProfile: config.dshConfigProfile,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
@@ -710,6 +723,8 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          dshBin: config.dshBin,
+          dshConfigProfile: config.dshConfigProfile,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
@@ -742,6 +757,8 @@ export default function CommandList(
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
+            dshBin: config.dshBin,
+            dshConfigProfile: config.dshConfigProfile,
             hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
             hermesModel: dropdownValueToModel(hermesModelChoice),
             backend: runtimeBackend,
@@ -967,6 +984,8 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          dshBin: config.dshBin,
+          dshConfigProfile: config.dshConfigProfile,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
@@ -1003,10 +1022,15 @@ export default function CommandList(
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
+          dshBin: config.dshBin,
+          dshConfigProfile: config.dshConfigProfile,
           hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
           hermesModel: dropdownValueToModel(hermesModelChoice),
           backend: runtimeBackend,
-          skillContent: readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
+          skillContent:
+            runtimeBackend === "dsh"
+              ? undefined
+              : readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
           skillFile: skill.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
           headlessMode: config.headlessMode,
           onPid: (pid) => {
@@ -1037,10 +1061,15 @@ export default function CommandList(
             claudeBin: config.claudeBin,
             codebuddyBin: config.codebuddyBin,
             hermesBin: config.hermesBin,
+            dshBin: config.dshBin,
+            dshConfigProfile: config.dshConfigProfile,
             hermesProfileHome: activeProfileHome ?? config.hermesProfileHome,
             hermesModel: dropdownValueToModel(hermesModelChoice),
             backend: runtimeBackend,
-            skillContent: readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
+            skillContent:
+              runtimeBackend === "dsh"
+                ? undefined
+                : readSkillContentForEmbedding(skill.skillFile), // Hermes 后端：SKILL.md 全文（带目录说明）嵌入 query
             skillFile: skill.skillFile, // 供 claude.ts 判断能否改走 Hermes -s 原生预加载
             headlessMode: config.headlessMode,
             onPid: (pid) => {
@@ -1163,52 +1192,77 @@ export default function CommandList(
   return (
     <List
       isLoading={isLoading}
+      navigationTitle={
+        selectedBackend === "dsh"
+          ? "Agent Executor · DeepSeek Harness"
+          : undefined
+      }
       searchBarPlaceholder="附加留言 / URL（http:// https:// file:// x-devonthink-item://）..."
       searchText={note}
       onSearchTextChange={setNote}
       searchBarAccessory={
-        <List.Dropdown
-          tooltip="Hermes 模型（自动记住选择，后续执行持续使用，直到手动更换）"
-          value={hermesModelChoice}
-          onChange={(v) => {
-            if (v === hermesModelChoice) return;
-            modelSelectionChanged.current = true;
-            setHermesModelChoice(v);
-            // 即时双写持久化；执行路径只读内存态，无需再确认
-            void persistSelectedHermesModel(
-              dropdownValueToModel(v) ?? "",
-            ).catch(() =>
-              showToast({
-                style: Toast.Style.Failure,
-                title: "模型选择保存失败",
-                message: "本次选择仍生效，请重新选择后重试保存",
-              }),
-            );
-          }}
-        >
-          <List.Dropdown.Item
-            title={defaultModelTitle(modelCatalog)}
-            value={DEFAULT_MODEL_CHOICE}
-          />
-          {modelCatalog?.providers.map((group) => (
-            <List.Dropdown.Section key={group.provider} title={group.provider}>
-              {group.models.map((m) => (
-                <List.Dropdown.Item
-                  key={m}
-                  title={m}
-                  value={`${group.provider}/${m}`}
-                />
-              ))}
-            </List.Dropdown.Section>
-          ))}
-          {/* 已选模型不在当前 profile 清单里（切了 profile）：保留回显并照传，hermes 报错可见 */}
-          {!selectedModelInCatalog && currentHermesModel && (
+        selectedBackend !== "hermes" ? (
+          <List.Dropdown
+            tooltip="执行后端（自动记住选择；DSH 模型跟随扩展设置中的配置来源）"
+            value={selectedBackend}
+            onChange={(value) => {
+              const next = value as AgentBackend;
+              setSelectedBackend(next);
+              writeSelectedBackendSync(next);
+            }}
+          >
+            <List.Dropdown.Item title="Claude Code" value="claude" />
+            <List.Dropdown.Item title="CodeBuddy" value="codebuddy" />
+            <List.Dropdown.Item title="Hermes" value="hermes" />
+            <List.Dropdown.Item title="DeepSeek Harness" value="dsh" />
+          </List.Dropdown>
+        ) : (
+          <List.Dropdown
+            tooltip="Hermes 模型（自动记住选择，后续执行持续使用，直到手动更换）"
+            value={hermesModelChoice}
+            onChange={(v) => {
+              if (v === hermesModelChoice) return;
+              modelSelectionChanged.current = true;
+              setHermesModelChoice(v);
+              // 即时双写持久化；执行路径只读内存态，无需再确认
+              void persistSelectedHermesModel(
+                dropdownValueToModel(v) ?? "",
+              ).catch(() =>
+                showToast({
+                  style: Toast.Style.Failure,
+                  title: "模型选择保存失败",
+                  message: "本次选择仍生效，请重新选择后重试保存",
+                }),
+              );
+            }}
+          >
             <List.Dropdown.Item
-              title={`${currentHermesModel}（当前 profile 未提供）`}
-              value={hermesModelChoice}
+              title={defaultModelTitle(modelCatalog)}
+              value={DEFAULT_MODEL_CHOICE}
             />
-          )}
-        </List.Dropdown>
+            {modelCatalog?.providers.map((group) => (
+              <List.Dropdown.Section
+                key={group.provider}
+                title={group.provider}
+              >
+                {group.models.map((m) => (
+                  <List.Dropdown.Item
+                    key={m}
+                    title={m}
+                    value={`${group.provider}/${m}`}
+                  />
+                ))}
+              </List.Dropdown.Section>
+            ))}
+            {/* 已选模型不在当前 profile 清单里（切了 profile）：保留回显并照传，hermes 报错可见 */}
+            {!selectedModelInCatalog && currentHermesModel && (
+              <List.Dropdown.Item
+                title={`${currentHermesModel}（当前 profile 未提供）`}
+                value={hermesModelChoice}
+              />
+            )}
+          </List.Dropdown>
+        )
       }
       actions={
         <ActionPanel>

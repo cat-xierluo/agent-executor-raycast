@@ -281,6 +281,15 @@ export default function StatusList() {
                 shortcut={{ modifiers: ["cmd"], key: "c" }}
               />
             )}
+            {run.sessionId && (
+              <Action.CopyToClipboard
+                title="复制会话 ID"
+                content={run.sessionId}
+              />
+            )}
+            {run.backend === "dsh" && (
+              <Action.Open title="打开 DeepSeek Harness" target="dsh://open" />
+            )}
             <Action
               title="刷新状态"
               onAction={loadStatus}
@@ -506,6 +515,10 @@ export function LogDetail({ run }: LogDetailProps) {
       logLines.push("Agent Executor - 运行日志");
       logLines.push("========================================");
       logLines.push(`Run ID: ${run.runId}`);
+      if (run.sessionId) logLines.push(`Session ID: ${run.sessionId}`);
+      if (run.backend === "dsh") {
+        logLines.push("DSH 会话：执行结束后，在相同工作区刷新会话列表回看。");
+      }
       if (startedEntry?.ts) {
         logLines.push(`开始时间: ${startedEntry.ts}`);
       }
@@ -744,6 +757,9 @@ export function LogDetail({ run }: LogDetailProps) {
           <Detail.Metadata.Separator />
 
           <Detail.Metadata.Label title="Run ID" text={run.runId} />
+          {run.sessionId && (
+            <Detail.Metadata.Label title="Session ID" text={run.sessionId} />
+          )}
           <Detail.Metadata.Label
             title="日志大小"
             text={`${logStats.totalLines} 行 / ${(logStats.totalChars / 1024).toFixed(2)} KB`}
@@ -773,6 +789,15 @@ export function LogDetail({ run }: LogDetailProps) {
       }
       actions={
         <ActionPanel>
+          {run.sessionId && (
+            <Action.CopyToClipboard
+              title="复制会话 ID"
+              content={run.sessionId}
+            />
+          )}
+          {run.backend === "dsh" && (
+            <Action.Open title="打开 DeepSeek Harness" target="dsh://open" />
+          )}
           <Action.CopyToClipboard
             title="复制日志内容"
             content={logContent}

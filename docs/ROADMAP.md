@@ -152,6 +152,31 @@
 | 移除 5 分钟超时          | 移除 CLI 执行的超时限制，避免误杀长任务，改为依赖进程自然退出                       | 🟡 中  | ✅   | 2026-05-01 |
 | 扩展入口与执行稳定性修复 | 修复 Raycast 命令图标、manifest checkbox 字段、后台执行转义、PID 取消和状态误判问题 | 🔴 高  | ✅   | 2026-05-20 |
 | Hermes 模型选择与记忆修复 | 支持含多段斜杠的模型名，明确传递 provider，重开保留选择并避免旧值覆盖 | 🔴 高 | ✅ | 2026-10-23 |
+| DeepSeek Harness 后端与会话回看 | 新增 DSH headless 后端、模型配置继承、Session ID 记录与 Desktop 回看验证 | 🔴 高 | ✅ | 2026-10-29 |
+
+### 已完成专项
+
+#### DSH-01：DeepSeek Harness 后端与会话回看（2026-10-29）
+
+- 来源：用户要求将扩展适配 DeepSeek Harness，并核验无头执行产生的会话能否在 Web/Desktop 中显示。
+- 状态：✅ 已完成；执行与集成 owner：本会话 Codex，独立工作树 `deepseek-harness-backend`。
+- 基准：本机 main `26d60de95c81b90dbb210b385106201d81a49fcd`，包含尚未推送的 Hermes 修复；远端 main `34cdc2b4978108d8992e0fc922bcf102fce36115`。保留主目录所有既有技能改动。
+- 范围：新增 DSH 后端选择、配置、技能输入、JSON 事件解析、队列透传、日志会话 ID；核验 Desktop 可见性并记录实时同步与回看边界。不迁移历史会话、不修改全局模型路由。
+- 验收清单：
+  - [x] 无头、流式及排队执行使用 DSH 原生参数并保留会话 ID。
+  - [x] 处理非零退出、缺少 final、截断事件及带空格路径。
+  - [x] 真实 DSH 调用成功；Desktop 中定位并打开对应会话。
+  - [x] 现有回归、类型检查及构建通过，完成 Raycast 重载与代表性交互。
+  - [x] 更新本卡、CHANGELOG 和使用说明，披露未验范围。
+
+**验收证据（2026-10-29）**
+
+- 真实调用：`RAYCAST_DSH_NATIVE_OK`（session `session-d85dda4c-5386-4220-8a9e-b2bc3c81bf65`）；Raycast 最小 `PATH=/usr/bin:/bin` 复测返回 `RAYCAST_DSH_PATH_OK`（session `session-17374311-a4ea-4c4b-8d8f-11860223abfe`）。
+- Desktop：刷新页面后，`只回复两个字：OK，不要调用任何工具` 出现在 `legal-skills / 未分组`；打开后可见原问题、`OK` 回复与“已完成，用时 2 秒”。CLI `0.2.1-rc.2`，Desktop `0.2.1-rc.3`。
+- 回归：`node scripts/test-deepseek.cjs`、`node scripts/test-hermes-execution.cjs`、`node scripts/test-hermes-model.cjs`、`npm run typescript`、`npm run build` 通过；`npm run dev` 已触发 Raycast 开发版重载。
+- UI：开发版中选择 DSH 后显示 `Agent Executor · DeepSeek Harness`，DSH 技能扫描为 39 项；状态页可见历史。修复 PATH 后未再次完整走完 Raycast 内自由指令（此前一次失败已定位并修复，用同最小 PATH 环境复测适配器通过），该项标记 `NOT_VERIFIED`。
+- 边界：外部 headless 进程不会实时推送进度到已连接 Desktop；需刷新/重连后在相同工作区查看。`dsh://open` 只能聚焦 Desktop，不能直达指定会话。可视化 Terminal 模式不支持 DSH。
+- 交付状态：候选已提交在独立分支 `feat/deepseek-harness`；主目录仍固定 main 且保留原有未提交技能改动，尚未采用本候选。
 
 ### 进行中任务
 
