@@ -35,6 +35,13 @@
       "mode": "view"
     },
     {
+      "name": "select-dsh-workspace",
+      "title": "选择 DSH Workspace",
+      "description": "扫描 ~/.dsh/bot/workspace/ 并切换 DeepSeek Harness bot 工作区",
+      "icon": "terminal.png",
+      "mode": "view"
+    },
+    {
       "name": "import-skill",
       "title": "导入 Skill",
       "description": "从本地目录或 URL 链接导入 Skill",

@@ -24,6 +24,36 @@ import { GlobalStatsItem } from "./components/StatsComponents";
 import { useStatusRefresh } from "./contexts/StatusRefreshContext";
 import { getQueuedTasks, dequeue, QueuedTask } from "./utils/taskQueue";
 
+async function relaunchDshDesktop() {
+  const confirmed = await confirmAlert({
+    title: "重启 DeepSeek Harness",
+    message:
+      "外部 DSH headless 会话不会实时注入已打开的 Desktop，需要完整重启后才会进入会话列表。\n\n如果 Desktop 正在执行其他任务，请先取消。",
+    primaryAction: { title: "重启并刷新" },
+  });
+  if (!confirmed) return;
+
+  try {
+    execSync(
+      "osascript -e 'tell application id \"com.deepseek.dsh\" to quit'",
+      { stdio: "ignore" },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    execSync("open -b com.deepseek.dsh", { stdio: "ignore" });
+    await showToast({
+      style: Toast.Style.Success,
+      title: "DSH 正在重启",
+      message: "加载完成后可在会话列表查看无头运行",
+    });
+  } catch (error) {
+    await showToast({
+      style: Toast.Style.Failure,
+      title: "重启 DSH 失败",
+      message: error instanceof Error ? error.message : "未知错误",
+    });
+  }
+}
+
 interface JsonLogEntry {
   ts?: string;
   run_id?: string;
@@ -290,6 +320,13 @@ export default function StatusList() {
             {run.backend === "dsh" && (
               <Action.Open title="打开 DeepSeek Harness" target="dsh://open" />
             )}
+            {run.backend === "dsh" && (
+              <Action
+                title="重启 DSH 显示无头会话"
+                onAction={relaunchDshDesktop}
+                icon={Icon.ArrowClockwise}
+              />
+            )}
             <Action
               title="刷新状态"
               onAction={loadStatus}
@@ -517,7 +554,9 @@ export function LogDetail({ run }: LogDetailProps) {
       logLines.push(`Run ID: ${run.runId}`);
       if (run.sessionId) logLines.push(`Session ID: ${run.sessionId}`);
       if (run.backend === "dsh") {
-        logLines.push("DSH 会话：执行结束后，在相同工作区刷新会话列表回看。");
+        logLines.push(
+          "DSH 会话：外部 headless 不会实时注入已打开 Desktop；重启 DSH 后在会话列表回看。",
+        );
       }
       if (startedEntry?.ts) {
         logLines.push(`开始时间: ${startedEntry.ts}`);
@@ -797,6 +836,13 @@ export function LogDetail({ run }: LogDetailProps) {
           )}
           {run.backend === "dsh" && (
             <Action.Open title="打开 DeepSeek Harness" target="dsh://open" />
+          )}
+          {run.backend === "dsh" && (
+            <Action
+              title="重启 DSH 显示无头会话"
+              onAction={relaunchDshDesktop}
+              icon={Icon.ArrowClockwise}
+            />
           )}
           <Action.CopyToClipboard
             title="复制日志内容"

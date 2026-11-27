@@ -49,6 +49,11 @@ import {
   dropdownValueToModel,
   type HermesModelCatalog,
 } from "./utils/hermesModel";
+import {
+  getSelectedDshWorkspaceSync,
+  resolveDshWorkspaceHome,
+  resolveSelectedOrFirstDshWorkspace,
+} from "./utils/dshWorkspace";
 import { toggleSkillPinned, toggleSkillNew } from "./utils/commandMetadata";
 import { parseNoteInput } from "./utils/urlDetector";
 import {
@@ -81,6 +86,10 @@ import {
 
 // 不需要文件的 Skill 名称列表（兼容层）
 const SKILLS_NO_FILE_REQUIRED = ["deepresearch", "sync-external"];
+
+function getRuntimeDshWorkspace() {
+  return resolveSelectedOrFirstDshWorkspace();
+}
 
 // 列表行副标题上限：frontmatter description 可达近千字（如 xlsx/docx），
 // 超长会把右侧 accessories 挤到看不见；截断后全文放 tooltip
@@ -212,6 +221,10 @@ export default function CommandList(
       g.models.some((m) => `${g.provider}/${m}` === currentHermesModel),
     ) ??
       false);
+  const [dshWorkspaceLabel, setDshWorkspaceLabel] = useState<string>(() => {
+    const name = getSelectedDshWorkspaceSync();
+    return resolveDshWorkspaceHome(name) ? name : "未选择";
+  });
 
   // 执行后端切换按钮（列表级与各技能均可见，点击在 Claude Code / CodeBuddy / Hermes 间轮换）
   const backendToggleAction = (
@@ -237,6 +250,22 @@ export default function CommandList(
       }
       icon={Icon.Person}
       shortcut={{ modifiers: ["cmd", "shift"], key: "p" }}
+    />
+  );
+
+  const dshWorkspaceToggleAction = (
+    <Action
+      title={`DSH Workspace：${dshWorkspaceLabel}`}
+      onAction={() =>
+        launchCommand({
+          name: "select-dsh-workspace",
+          type: LaunchType.UserInitiated,
+        }).catch(() => {
+          return;
+        })
+      }
+      icon={Icon.Box}
+      shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
     />
   );
 
@@ -432,6 +461,15 @@ export default function CommandList(
     }
     try {
       const config = getConfig();
+      const dshWorkspace =
+        selectedBackend === "dsh" ? getRuntimeDshWorkspace() : undefined;
+      if (
+        selectedBackend === "dsh" &&
+        dshWorkspace &&
+        dshWorkspaceLabel !== dshWorkspace.name
+      ) {
+        setDshWorkspaceLabel(dshWorkspace.name);
+      }
       // 传当前后端：Hermes 时按 .hermes/.agents + Hermes skills 布局扫描
       // hermesProfileHome 给定时扫 profile 的 skills/（隔离岛），空时扫主 ~/.hermes/skills/
       const availableSkills = scanSkills(
@@ -439,6 +477,7 @@ export default function CommandList(
         config.skillsDirs,
         selectedBackend,
         activeProfileHome ?? config.hermesProfileHome,
+        dshWorkspace?.home,
       );
       setItems(availableSkills);
       // 模型清单同源重读：主配置 + profile 合并（config.yaml 改动后 Cmd+R 即生效）
@@ -657,7 +696,10 @@ export default function CommandList(
     const runtimeBackend = selectedBackend;
 
     try {
-      const projectDir = config.projectDirs[0];
+      const projectDir =
+        (runtimeBackend === "dsh"
+          ? getRuntimeDshWorkspace()?.home
+          : undefined) || config.projectDirs[0];
 
       // 构建 prompt：多文件 + URL
       const allArgs = allInputs.map((f) => `"${f}"`).join(" ");
@@ -681,7 +723,7 @@ export default function CommandList(
         enqueue({
           skillName: "free-command",
           prompt,
-          projectDir: config.projectDirs[0],
+          projectDir,
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
@@ -948,7 +990,12 @@ export default function CommandList(
     const runtimeBackend = backendOverride ?? selectedBackend;
 
     try {
-      const projectDir = skill.projectDir || config.projectDirs[0];
+      const projectDir =
+        (runtimeBackend === "dsh"
+          ? getRuntimeDshWorkspace()?.home
+          : undefined) ||
+        skill.projectDir ||
+        config.projectDirs[0];
 
       // 构建 prompt
       let prompt = `/${skill.name}`;
@@ -980,7 +1027,7 @@ export default function CommandList(
           skillName: skill.name,
           skillFile: skill.skillFile, // Hermes 后端回放时读取 SKILL.md 全文嵌入 query
           prompt,
-          projectDir: skill.projectDir || config.projectDirs[0],
+          projectDir,
           claudeBin: config.claudeBin,
           codebuddyBin: config.codebuddyBin,
           hermesBin: config.hermesBin,
@@ -1194,7 +1241,7 @@ export default function CommandList(
       isLoading={isLoading}
       navigationTitle={
         selectedBackend === "dsh"
-          ? "Agent Executor · DeepSeek Harness"
+          ? `Agent Executor · DeepSeek Harness · ${dshWorkspaceLabel}`
           : undefined
       }
       searchBarPlaceholder="附加留言 / URL（http:// https:// file:// x-devonthink-item://）..."
@@ -1268,6 +1315,7 @@ export default function CommandList(
         <ActionPanel>
           {backendToggleAction}
           {profileToggleAction}
+          {selectedBackend === "dsh" && dshWorkspaceToggleAction}
           <Action
             title="刷新列表"
             onAction={loadSkills}

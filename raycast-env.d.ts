@@ -52,6 +52,8 @@ declare namespace Preferences {
   export type Commands = ExtensionPreferences & {}
   /** Preferences accessible in the `select-profile` command */
   export type SelectProfile = ExtensionPreferences & {}
+  /** Preferences accessible in the `select-dsh-workspace` command */
+  export type SelectDshWorkspace = ExtensionPreferences & {}
   /** Preferences accessible in the `import-skill` command */
   export type ImportSkill = ExtensionPreferences & {}
   /** Preferences accessible in the `status` command */
@@ -66,6 +68,8 @@ declare namespace Arguments {
 }
   /** Arguments passed to the `select-profile` command */
   export type SelectProfile = {}
+  /** Arguments passed to the `select-dsh-workspace` command */
+  export type SelectDshWorkspace = {}
   /** Arguments passed to the `import-skill` command */
   export type ImportSkill = {}
   /** Arguments passed to the `status` command */
