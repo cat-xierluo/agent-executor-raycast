@@ -1,6 +1,6 @@
 # Agent Executor 项目路线图
 
-> Last updated: 2026-10-20
+> Last updated: 2026-11-17
 > 本文是 Agent Executor Raycast Extension 的发展路线图，记录已完成功能和未来计划。
 
 ## 项目愿景
@@ -18,6 +18,7 @@
 - **✅ 通用化重命名**: 扩展重命名为 "Agent Executor"，适用于任何 Claude Code 项目
 - **✅ 关键问题修复**: 完成任务状态读取和监控系统的所有关键缺陷修复
 - **✅ 扩展入口与执行稳定性修复**: 修复 Raycast 命令图标、类型检查和后台执行转义问题
+- **✅ DSH Bot Workspace 迁移**: 支持 `~/.dsh/bot/workspace/` 动态选择、递归技能扫描与运行目录切换
 - **🔄 持续优化中**: 用户体验和稳定性持续改进
 
 ## 阶段状态速览
@@ -28,7 +29,7 @@
 | **阶段二：DevonThink 集成** | 支持 DevonThink 文件操作           | 4/4 完成   | 🟢 已完成 |
 | **阶段三：日志与监控**      | 基础日志系统和状态监控             | 10/10 完成 | 🟢 已完成 |
 | **阶段四：关键修复**        | 修复任务状态读取和监控系统         | 8/8 完成   | 🟢 已完成 |
-| **阶段五：体验优化**        | 提升用户体验和稳定性               | 5/9 完成   | 🟡 进行中 |
+| **阶段五：体验优化**        | 提升用户体验和稳定性               | 7 项已完成 | 🟡 进行中 |
 
 ---
 
@@ -144,13 +145,95 @@
 
 ### 已完成任务
 
-| 任务                     | 描述                                                                                | 优先级 | 状态 | 完成时间   |
-| :----------------------- | :---------------------------------------------------------------------------------- | :----- | :--- | :--------- |
-| Session ID 捕获          | 在后台和可视化模式中捕获 Claude Code session ID，支持会话恢复功能                   | 🔴 高  | ✅   | 2026-01-11 |
-| 可视化模式实现           | 使用 AppleScript 在 Terminal 窗口中显示命令执行过程，支持调试和实时输出查看         | 🔴 高  | ✅   | 2026-01-11 |
-| 任务队列与并发控制       | 新增队列模块，支持配置最大并发数，超限自动排队，队列持久化到磁盘                    | 🔴 高  | ✅   | 2026-05-01 |
-| 移除 5 分钟超时          | 移除 CLI 执行的超时限制，避免误杀长任务，改为依赖进程自然退出                       | 🟡 中  | ✅   | 2026-05-01 |
-| 扩展入口与执行稳定性修复 | 修复 Raycast 命令图标、manifest checkbox 字段、后台执行转义、PID 取消和状态误判问题 | 🔴 高  | ✅   | 2026-05-20 |
+| 任务                            | 描述                                                                                | 优先级 | 状态 | 完成时间   |
+| :------------------------------ | :---------------------------------------------------------------------------------- | :----- | :--- | :--------- |
+| Session ID 捕获                 | 在后台和可视化模式中捕获 Claude Code session ID，支持会话恢复功能                   | 🔴 高  | ✅   | 2026-01-11 |
+| 可视化模式实现                  | 使用 AppleScript 在 Terminal 窗口中显示命令执行过程，支持调试和实时输出查看         | 🔴 高  | ✅   | 2026-01-11 |
+| 任务队列与并发控制              | 新增队列模块，支持配置最大并发数，超限自动排队，队列持久化到磁盘                    | 🔴 高  | ✅   | 2026-05-01 |
+| 移除 5 分钟超时                 | 移除 CLI 执行的超时限制，避免误杀长任务，改为依赖进程自然退出                       | 🟡 中  | ✅   | 2026-05-01 |
+| 扩展入口与执行稳定性修复        | 修复 Raycast 命令图标、manifest checkbox 字段、后台执行转义、PID 取消和状态误判问题 | 🔴 高  | ✅   | 2026-05-20 |
+| Hermes 模型选择与记忆修复       | 支持含多段斜杠的模型名，明确传递 provider，重开保留选择并避免旧值覆盖               | 🔴 高  | ✅   | 2026-10-23 |
+| DeepSeek Harness 后端与会话回看 | 新增 DSH headless 后端、模型配置继承、Session ID 记录与 Desktop 回看验证            | 🔴 高  | ✅   | 2026-10-29 |
+| DSH Bot Workspace 迁移          | 动态扫描和选择 `~/.dsh/bot/workspace/`，递归读取 bot skills 并切换运行目录          | 🔴 高  | ✅   | 2026-11-17 |
+| DSH 无头会话实时归组           | 用 `dsh-session-adopt` 让外部 headless 会话免重启出现并自动归入对应 Workspace   | 🔴 高  | ✅   | 2026-11-18 |
+| DSH 无人值守任务不再被打断      | 子进程独立进程组 + 文件型输出，Raycast 回收不再杀任务；中断后自动续跑一次        | 🔴 高  | ✅   | 2026-11-27 |
+
+### 已完成专项
+
+#### DSH-02：DSH Bot Workspace 迁移与智能选择（2026-11-17）
+
+- 来源：用户要求将 Raycast 扩展整体迁移到 DeepSeek Harness bot workspace，并支持后续多个 bot workspace 选择。
+- 状态：✅ 已完成；实施 owner：本会话 Codex，独立工作树 `dsh-bot-workspaces`，主目录在途技能改动保持原样。
+- 范围：新增 DSH workspace 扫描、持久化与二级菜单；DSH 技能扫描支持平铺、分类与符号链接布局；自由指令、技能直执行与排队回放统一使用选中 workspace。未修改 bot workspace 内技能和 DSH 模型配置。
+- 验收清单：
+  - [x] `info-assistant` 实际目录扫描到 65 个 `SKILL.md`，包含平铺符号链接与分类子目录。
+  - [x] 假 DSH_HOME 单测验证 workspace 发现、默认选择、持久化与路径解析。
+  - [x] DSH 既有回归覆盖 argv/stdin、UTF-8、final 完整性、失败路径与两条执行入口。
+  - [x] `npm run typescript`、`npm run build` 通过；`npm run dev` 已触发 Raycast 开发版重载。
+  - [x] 真实 Raycast 自由指令在 `info-assistant` 调用 DSH 成功，返回 `{"workspace":"info-assistant","skills":72}`；Raycast 技能树为 65 项，差异来自 workspace 内历史 `skills-copy-backup-20261115` 也含可读 `SKILL.md`，按设计不进入技能菜单。
+  - [x] 更新 CHANGELOG 与本路线图。
+- 运行配置：Raycast 偏好 `dshBin` 已更新为 `/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh`（版本 `0.2.2-rc.3`）；首次真实调用暴露最小 PATH 缺失 `dirname`，已在 DSH 子进程环境中补齐 `/usr/bin:/bin` 并复测成功。
+- 桌面回看：外部 DSH headless 会话落盘后，不会实时注入已打开 Desktop；实测前端 `Cmd+R` 不触发重建索引，完整退出并重开 DSH 后，失败会话 `session-1993479e-9a63-4d69-ba8f-57b723036d4d` 与新验证会话均出现在「未分组」。状态页已提供带确认的「重启 DSH 显示无头会话」动作。
+- 失败结算：该失败运行的 DSH 子进程成为僵尸进程且 stdout 管道被保留，导致 `close` 事件不触发；`executeDsh` 增加 `exit` 兜底结算并补充孤儿管道回归。
+
+**验收证据（2026-11-17）**
+
+- 真实调用：run `run_20261117_222502750_1253_uzpd`，session `session-87818f62-3ed6-4f9c-8a8b-3741f8aaaad2`，工作目录为 `info-assistant` bot workspace，耗时 30.331 秒，状态 `completed/success`。
+- 实际输出：`{"workspace":"info-assistant","skills":72}`。该统计覆盖整个 workspace（含历史备份）；Raycast 菜单只扫描 `skills/`，显示 65 个可用技能。
+- PATH 回归：`node scripts/test-deepseek.cjs` 增加 DSH 子进程必须包含 `/usr/bin:/bin` 的断言，继续覆盖 argv/stdin、UTF-8、final 完整性、失败路径与两条执行入口。
+
+#### DSH-01：DeepSeek Harness 后端与会话回看（2026-10-29）
+
+- 来源：用户要求将扩展适配 DeepSeek Harness，并核验无头执行产生的会话能否在 Web/Desktop 中显示。
+- 状态：✅ 已完成；执行与集成 owner：本会话 Codex，独立工作树 `deepseek-harness-backend`。
+- 基准：本机 main `26d60de95c81b90dbb210b385106201d81a49fcd`，包含尚未推送的 Hermes 修复；远端 main `34cdc2b4978108d8992e0fc922bcf102fce36115`。保留主目录所有既有技能改动。
+- 范围：新增 DSH 后端选择、配置、技能输入、JSON 事件解析、队列透传、日志会话 ID；核验 Desktop 可见性并记录实时同步与回看边界。不迁移历史会话、不修改全局模型路由。
+- 验收清单：
+  - [x] 无头、流式及排队执行使用 DSH 原生参数并保留会话 ID。
+  - [x] 处理非零退出、缺少 final、截断事件及带空格路径。
+  - [x] 真实 DSH 调用成功；Desktop 中定位并打开对应会话。
+  - [x] 现有回归、类型检查及构建通过，完成 Raycast 重载与代表性交互。
+  - [x] 更新本卡、CHANGELOG 和使用说明，披露未验范围。
+
+**验收证据（2026-10-29）**
+
+- 真实调用：`RAYCAST_DSH_NATIVE_OK`（session `session-d85dda4c-5386-4220-8a9e-b2bc3c81bf65`）；Raycast 最小 `PATH=/usr/bin:/bin` 复测返回 `RAYCAST_DSH_PATH_OK`（session `session-17374311-a4ea-4c4b-8d8f-11860223abfe`）。
+- Desktop：刷新页面后，`只回复两个字：OK，不要调用任何工具` 出现在 `legal-skills / 未分组`；打开后可见原问题、`OK` 回复与“已完成，用时 2 秒”。CLI `0.2.1-rc.2`，Desktop `0.2.1-rc.3`。
+- 回归：`node scripts/test-deepseek.cjs`、`node scripts/test-hermes-execution.cjs`、`node scripts/test-hermes-model.cjs`、`npm run typescript`、`npm run build` 通过；`npm run dev` 已触发 Raycast 开发版重载。
+
+#### DSH-03：DSH 无头会话实时归组（2026-11-18）
+
+- 来源：用户要求外部 headless 会话无需重启即可在桌面端出现，并可按 bot workspace 自动归组。
+- 状态：✅ 已完成；实施 owner：本会话 Codex，工作树沿用 `dsh-bot-workspaces`。
+- 范围：只改本机 DSH desktop profile 的插件装配与配置；未改 Raycast 扩展代码，未改 bot workspace 内技能与模型配置。
+- 根因：Desktop 的 `cwd → Workspace` 索引与浏览器会话目录都只在启动时建立一次，外部 headless 写入是冷写入，不发 `session/created`，因此既不实时出现也不自动归组。
+- 验收清单：
+  - [x] 调研 166 个市场插件，确认无现成的会话列表自动刷新插件后先自研原型验证可行。
+  - [x] 安装并实测 `dsh-session-adopt` 0.3.1：`session-adopt` 行在 Loader 中 `active=2`。
+  - [x] 真实无头会话在 CLI 完成后 3 秒内出现在侧栏，并归入 `info-assistant` 而非「未分组」。
+  - [x] 停用自研插件后重跑回归，归组仍成功（CLI 完成后 15 秒内归组），证明不依赖自研插件。
+  - [x] 侧栏截图取证：`info-assistant` 分组展开后含 `DSH 201117 归组验证` 等新会话，「同步会话 / 导入会话」按钮在位。
+- 运行配置：`~/.dsh/profiles/desktop/cordis.patch.yml` 覆盖 `session-adopt` 行，`pollIntervalMs: 300000`；自研 `dsh-session-autorefresh` 已从依赖、bundles 与 patch 三处完全移除。
+- 遗留边界：`session-adopt` 归组走 `workspace.attachSession()`，只覆盖 cwd 已注册的工作区；新建 cwd 会按 `autoCreateWorkspaces: true` 自动建组。跨 harness 导入为快照语义，外部会话后续追加的轮次不会同步。
+
+#### DSH-04：DSH 无人值守任务不再被 Raycast 回收打断（2026-11-27）
+
+- 来源：用户反馈 DS Bot 的会话「能启动但中途已停止」，要求查清真正被终止的原因并一次性跑完。
+- 状态：✅ 已完成；实施 owner：本会话 Codex，工作树沿用 `dsh-bot-workspaces`。
+- 范围：只改 DSH 执行器的进程启动方式与中断收尾；未改模型配置、bot workspace 技能与桌面端插件。
+- 根因：`executeDsh` 用 `spawn` 启动子进程但未 `detached`，与 Raycast 命令进程同组；Raycast 关闭命令界面时整组发 SIGTERM，DSH 走优雅关闭，Agent 被 dispose，落盘 `turn/end {"kind":"aborted","reason":{"kind":"disposed"}}`，在途工具调用变 `ABORTED_BEFORE_DISPATCH`。
+- 排除项（均有实测）：`session-adopt` 无停会话代码路径；任务跑到一半点「同步会话」仍正常完成；11-17 插件安装前就有同签名中断；从 shell 直接启动的运行从未中断。
+- 验收清单：
+  - [x] 用 SIGTERM 实测复现同一日志签名，确认中断来自外部终止信号。
+  - [x] 统计近 14 天 8 条 Raycast 启动会话：7 条首轮 `aborted`，唯一 `completed` 的那台是从 shell 启动的探针。
+  - [x] 子进程 `detached` 后，整组 SIGTERM 杀掉父进程，任务仍跑完 7 步并写出 `turn/end completed` + `REAL_LONG_DONE`。
+  - [x] 对运行中的子进程发 SIGTERM，扩展自动用 `--session-id` 续跑同一会话并返回成功。
+  - [x] `node scripts/test-deepseek.cjs`（含新增独立进程组断言、`disposed` 用例、续跑断言）、`npm run typescript`、`npm run build` 通过；`npm run dev` 已触发 Raycast 重载。
+- 遗留边界：父进程被杀后，本次运行的状态记录无人结算，状态页需等下次刷新按日志/进程存活度对账；`detached` 子进程若被单独 kill 其 PID，其子任务（如 bash）可能残留。
+- Lint：`npm run lint` 仍因既有 `select-profile.tsx`、`devonthink.ts` 格式问题失败并保留 19 条既有警告；DSH 新增文件在修复 `prefer-const` 后无 lint error。
+- UI：主目录版本重载后显示 `Agent Executor · DeepSeek Harness`，DSH 技能扫描为 39 项；在 Raycast 内选择“自由指令”实际执行成功，状态页显示成功、11 秒、PID 2331、退出码 0 与完整 Session ID。
+- 边界：外部 headless 进程不会实时推送进度到已连接 Desktop；需刷新/重连后在相同工作区查看。`dsh://open` 只能聚焦 Desktop，不能直达指定会话。可视化 Terminal 模式不支持 DSH。
+- 交付状态：候选 `86d5ca2`/`c53a1c5` 已按窄采用流程进入 main（`b8c3827`，超时声明修复 `24de049`）；主目录原有未提交技能改动保持原样。主目录实测 `RAYCAST_UI_DSH_OK` 成功（session `session-43bddca5-0655-4792-99e6-1090765e1244`，11 秒，exit 0），状态页可见 Session ID、退出码和复制动作。
 
 ### 进行中任务
 
@@ -354,6 +437,14 @@ const child = spawn("/bin/bash", ["-c", bashCommand], {
 ---
 
 ## 进度日志
+
+### 2026-10-23
+
+- **用户反馈闭环：模型选择不生效且无法记忆**。真实选择值 `magpie/minimax-code/MiniMax-M3.1-Flash` 含两个 `/`，旧白名单将其清空，导致保存空值且执行不带模型参数，继续使用默认 GLM。现允许安全的多段模型路径，以首个 `/` 拆开 provider 和完整模型名；所有执行入口共用参数转换。空文件表示明确跟随默认，旧存储仅在文件缺失时迁移；迁移和快速切换不再覆盖新选择。
+- **插件内执行复核**：首次从自由指令按钮运行测试，虽然返回成功，却产生 Claude 会话 `c44829d9-dc3c-4b56-82b4-a6978b36e8a0`。已移除自由指令未使用的后端覆盖参数，并显式包裹按钮回调，确保使用当前所选后端；增加真实自由指令函数的回调参数回归测试。
+- **修复后插件内实测通过**：页面保持 MiniMax 选择，运行无文件的自由指令后返回 `RAYCAST_HERMES_MINIMAX_OK`；扩展日志记录成功，会话 `20261023_173953_6e7a7d` 在 Hermes profile 数据库中的模型为 `minimax-code/MiniMax-M3.1-Flash`，来源为 `cli`。模型记忆与页面到 Hermes 的执行链均已核验；真实终端窗口和排队后回放仅做参数级验证。
+- **验收证据**：`node scripts/test-hermes-model.cjs` 覆盖规范化、持久化、默认与迁移竞态；`node scripts/test-hermes-execution.cjs` 覆盖后台/流式实际 spawn 参数、默认参数及终端脚本。`npm run typescript`、`npm run build` 通过，`npm run dev` 已成功构建并重载。Raycast 实际下拉选中 MiniMax，退出命令并重新进入仍显示 `minimax-code/MiniMax-M3.1-Flash`，同步文件保存完整选择值。真实 Hermes 调用 exit 0 返回 `MODEL_SELECTION_OK`，只读核验会话 `20261023_170145_97cd46` 的模型字段为 `minimax-code/MiniMax-M3.1-Flash`。
+- **检查限制**：全量 `npm run lint` 未通过，原因包括未修改的 `package.json` 作者 `maoking` 在 Raycast 用户接口返回 404，以及 `select-profile.tsx`、`devonthink.ts`、`hermesProfile.ts`、`skills.ts` 的既有格式问题；ESLint 无错误，保留既有快捷键警告。命令日志保存在隔离 worktree 的 `scripts/261023 *.log`，不提交运行日志。
 
 ### 2026-10-21
 

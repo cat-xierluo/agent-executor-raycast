@@ -2,6 +2,73 @@
 
 所有重要的变更都会记录在此文件中。
 
+## [2026-11-27]
+
+### 修复 (Fixed)
+
+- **DSH 无人值守任务被 Raycast 回收打断**：执行子进程此前与 Raycast 命令进程同属一个进程组，Raycast 关闭命令界面时会整组发 SIGTERM，DSH 随即优雅关闭并落盘 `turn/end aborted/disposed`，正在派发的工具调用变成 `ABORTED_BEFORE_DISPATCH`。近 14 天 8 条 Raycast 启动的会话中有 7 条首轮被打断，只能靠手动续跑救场。
+  - 子进程改为 `detached`（独立进程组），stdout/stderr 落文件而非管道，扩展轮询文件读取进度：Raycast 被回收不再影响任务本身。
+  - 实测整组 SIGTERM 杀掉父进程后，任务仍继续跑完 7 步并写出 `turn/end completed` 与 `REAL_LONG_DONE`。
+  - 每次尝试使用独立的 `output-N.jsonl` / `stderr-N.log`，续跑不会读到上一次的关闭残留。
+
+### 新增 (Added)
+
+- **DSH 中断自动续跑兜底**：运行以 `aborted`/外部终止收场且已建立会话时，自动用 `--session-id` 在同一会话上续跑一次，不再把中断当作最终失败。
+  - 实测对运行中的子进程发 SIGTERM 后，扩展自动续跑同一会话并返回成功。
+  - 回归新增独立进程组断言、`disposed` 中断用例与续跑参数/提示词断言。
+
+## [2026-11-18]
+
+### 改进 (Improved)
+
+- **DSH 无头会话实时回看改用官方插件**：桌面端安装 `dsh-session-adopt` 0.3.1（`github:FrozMN/dsh-session-adopt#v0.3.1`），外部 headless 会话无需重启 DSH 即出现在侧栏，并按规范 cwd 自动归入对应 Workspace（如 `info-assistant`）而非「未分组」。
+  - 该插件在侧栏底部提供「同步会话 / 导入会话」入口，同步按钮显示最近一次归组数量；另支持从 pi、VS Code Copilot 等外部 harness 导入会话。
+  - desktop profile 将 `pollIntervalMs` 覆盖为 300000（默认 7200000），兼顾及时性与扫描开销。
+  - 自研的 `dsh-session-autorefresh` 已验证可用后卸载并移除其装载行；最终仅 `dsh-session-adopt` 生效。
+
+## [2026-11-17]
+
+### 新增 (Added)
+
+- **DSH Bot Workspace 二级选择器**：新增「选择 DSH Workspace」命令，动态扫描 `~/.dsh/bot/workspace/*/skills/`；后续新增 bot workspace 会自动出现在列表中，无需改代码或改偏好。
+  - 选择持久化到 `~/.dsh/bot/active-workspace`；未选择且只有一个 workspace 时自动采用该 workspace，当前会落到 `info-assistant`。
+  - DSH 后端技能扫描改为选中 workspace 的独占模式，支持 `skills/<skill>/SKILL.md`、`skills/<分类>/<skill>/SKILL.md` 与逐项符号链接；实测 `info-assistant` 可读 65 个技能。
+  - 自由指令、技能直执行与排队回放的 DSH 工作目录统一改为选中 workspace，保证技能相对资源按 bot 目录解析。
+  - 主界面在 DSH 后端显示 `DSH Workspace：<名称>` 动作（`Cmd+Shift+W`）并进入二级选择器；标题栏同步显示当前 workspace。
+
+### 改进 (Improved)
+
+- **DSH Workspace 扫描体验**：选择器显示 workspace 简介、技能数量和当前选中标记；目录不存在或未发现 workspace 时给出明确空态/错误提示。
+- **DSH 无头会话桌面回看**：状态页新增「重启 DSH 显示无头会话」动作；实测外部 headless 会话不会实时注入已打开 Desktop，前端 `Cmd+R` 也不够，需完整重启 DSH 后才会进入会话列表。
+
+### 修复 (Fixed)
+
+- **DSH 官方 App 内 CLI 启动失败**：Raycast 最小环境缺少 `/usr/bin:/bin`，导致官方 shell wrapper 找不到 `dirname`。`withLauncherPath()` 现在为 DSH 子进程补齐基础系统 PATH；实测可启动 App 内 `dsh` 0.2.2-rc.3 并完成真实模型调用。
+- **DSH 僵尸进程导致状态卡住**：官方 wrapper 可在退出后留下子进程持有 stdout 管道，使 Node `close` 事件不触发。现在增加 `exit` 兜底结算，失败会回到 Raycast 状态页而不是一直显示运行中。
+
+## [2026-10-29]
+
+### 新增 (Added)
+
+- **DeepSeek Harness (DSH) 执行后端**：执行后端新增 DSH，可在设置、主界面下拉或 `Cmd+Shift+B` 轮换中选择并跨次记忆。后台与流式执行走 `dsh --profile headless --json`，解析会话 ID、工具进度、思考/文本事件、最终回复与非零失败；技能正文经 stdin 注入，不受 argv 长度与 shell 转义影响。
+  - 新增 `src/utils/deepseek.ts`：从所选 `~/.dsh/profiles/<desktop|web|next>/cordis.patch.yml` 只复制模型与搜索配置到临时 headless patch，同时启用已保存凭据、`danger-full-access` 与免审批；不复制 UI 插件树，也不在日志输出凭据。
+  - DSH 原生会话落盘到同一 `$DSH_HOME/sessions`；状态页记录并显示 Session ID，支持复制，另提供 `dsh://open` 打开 Desktop。实测刷新 Desktop 后可在对应工作区回看无头会话的原问题、回复与完成状态；外部进程不会实时注入已连接 Desktop，需刷新/重连后查看。
+  - 技能扫描支持项目 `.dsh/skills`、`.agents/skills`、`.claude/skills` 及用户级 `.dsh/skills`、`.agents/skills`；排队任务透传 DSH 参数并登记 PID，可取消。
+  - 自动把 DSH 启动器所在 Node 目录补进子进程 `PATH`，修复 Raycast 最小环境下 `env: node: No such file or directory`。
+  - 当前 DSH 后端不支持弹 Terminal 的可视化模式，会明确报错并提示改用后台/流式模式。
+
+### 修复 (Fixed)
+
+- **DSH 完成判定**：按真实 `turn_end.reason.kind` 与 final 事件判定成功，避免把模型已回答但进程异常/缺少 final 的运行误判为成功；补充 30 分钟超时、失败路径流式回显与缺失模型配置前置报错。
+
+## [2026-10-23]
+
+### 修复 (Fixed)
+
+- **Hermes 模型选择与记忆**：修复网关模型名含多段 `/` 时被误判为无效、选择被清空并继续使用默认 GLM 的问题。MiniMax 等模型现按 `--provider magpie -m minimax-code/MiniMax-M3.1-Flash` 明确传递；后台、流式、排队及终端执行沿用同一参数规则。
+- **跨次启动保持手动选择**：启动时的旧存储迁移不再覆盖刚选的模型，快速切换按顺序保存；手动回到「默认」后不再恢复旧选择。模型选择器提示会持续使用所选模型，直到手动更换。
+- **自由指令后端绑定**：执行按钮明确调用当前所选后端，移除未使用的后端覆盖参数，避免回调参数被当作后端并落到 Claude。
+
 ## [Unreleased]
 
 ### 新增 (Added)

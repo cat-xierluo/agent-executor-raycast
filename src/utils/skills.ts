@@ -144,12 +144,26 @@ function scanSkillsDirectory(
  * 扫描单个项目的技能目录：Claude 后端扫 .claude/skills，
  * Hermes 后端扫 .hermes/skills 与 .agents/skills（Hermes 的项目级发现路径）。
  */
-function scanSingleProjectSkills(projectDir: string, backend?: string): ClaudeSkill[] {
+function scanSingleProjectSkills(
+  projectDir: string,
+  backend?: string,
+): ClaudeSkill[] {
+  if (backend === "dsh") {
+    return [".dsh/skills", ".agents/skills", ".claude/skills"].flatMap((sub) =>
+      scanSkillsDirectory(
+        join(projectDir, sub),
+        projectDir,
+        getProjectName(projectDir),
+      ),
+    );
+  }
   if (backend === "hermes") {
     const skills: ClaudeSkill[] = [];
     const projectName = getProjectName(projectDir);
     for (const sub of [".hermes/skills", ".agents/skills"]) {
-      skills.push(...scanSkillsDirectory(join(projectDir, sub), projectDir, projectName));
+      skills.push(
+        ...scanSkillsDirectory(join(projectDir, sub), projectDir, projectName),
+      );
     }
     return skills;
   }
@@ -174,12 +188,14 @@ export function scanSkills(
   standaloneSkillsDirs: string[] = [],
   backend?: string,
   hermesProfileHome?: string,
+  dshWorkspaceHome?: string,
 ): ClaudeSkill[] {
   const cacheKey = JSON.stringify({
     projectDirs,
     standaloneSkillsDirs,
     backend,
     hermesProfileHome,
+    dshWorkspaceHome,
   });
   if (
     skillsCache &&
@@ -251,7 +267,9 @@ export function scanSkills(
   if (backend === "hermes" && hermesProfileHome) {
     const hermesSkillsRoot = join(hermesProfileHome, "skills");
     if (existsSync(hermesSkillsRoot)) {
-      for (const entry of readdirSync(hermesSkillsRoot, { withFileTypes: true })) {
+      for (const entry of readdirSync(hermesSkillsRoot, {
+        withFileTypes: true,
+      })) {
         if (entry.isDirectory() || entry.isSymbolicLink()) {
           const dir = join(hermesSkillsRoot, entry.name);
           if (isValidSkillDir(dir)) {
@@ -279,6 +297,15 @@ export function scanSkills(
     return finishScan(allSkills);
   }
 
+  if (backend === "dsh" && dshWorkspaceHome) {
+    return finishScan(
+      scanDshWorkspaceSkills(
+        dshWorkspaceHome,
+        `DSH · ${basename(dshWorkspaceHome)}`,
+      ),
+    );
+  }
+
   // ── 常规模式 ─────────────────────────────────────────────────────────
   for (const dir of projectDirs) {
     const skills = scanSingleProjectSkills(dir, backend);
@@ -287,6 +314,17 @@ export function scanSkills(
 
   const defaultExecutionProjectDir = projectDirs[0];
   if (defaultExecutionProjectDir) {
+    if (backend === "dsh") {
+      for (const sub of [".dsh/skills", ".agents/skills"]) {
+        allSkills.push(
+          ...scanSkillsDirectory(
+            join(homedir(), sub),
+            defaultExecutionProjectDir,
+            "DSH Skills",
+          ),
+        );
+      }
+    }
     // standaloneSkillsDirs（默认 ~/.claude/skills）只在 Claude/CodeBuddy 后端扫描。
     // Hermes 后端跳过：Hermes 不读该目录，扫了只会混入 Claude 全局技能。
     if (backend !== "hermes") {
@@ -303,7 +341,9 @@ export function scanSkills(
     if (backend === "hermes") {
       const hermesSkillsRoot = join(homedir(), ".hermes/skills");
       if (existsSync(hermesSkillsRoot) && isValidSkillsDir(hermesSkillsRoot)) {
-        for (const entry of readdirSync(hermesSkillsRoot, { withFileTypes: true })) {
+        for (const entry of readdirSync(hermesSkillsRoot, {
+          withFileTypes: true,
+        })) {
           if (entry.isDirectory() || entry.isSymbolicLink()) {
             const catDir = join(hermesSkillsRoot, entry.name);
             if (isValidSkillsDir(catDir)) {
@@ -321,6 +361,65 @@ export function scanSkills(
   }
 
   return finishScan(allSkills);
+}
+
+function scanDshWorkspaceSkills(
+  workspaceHome: string,
+  workspaceLabel: string,
+): ClaudeSkill[] {
+  const skillsRoot = join(workspaceHome, "skills");
+  if (!existsSync(skillsRoot)) return [];
+
+  const skills: ClaudeSkill[] = [];
+  const scanBranch = (branch: string, label: string, depth: number): void => {
+    if (depth > 4) return;
+
+    if (isValidSkillDir(branch)) {
+      skills.push(...scanSkillsDirectory(branch, workspaceHome, label));
+      return;
+    }
+
+    try {
+      const entries = readdirSync(branch, { withFileTypes: true }).filter(
+        (entry) =>
+          (entry.isDirectory() || entry.isSymbolicLink()) &&
+          !entry.name.startsWith("."),
+      );
+      const hasFlatSkills = entries.some((entry) =>
+        isValidSkillDir(join(branch, entry.name)),
+      );
+      if (hasFlatSkills) {
+        skills.push(...scanSkillsDirectory(branch, workspaceHome, label));
+      }
+
+      for (const entry of entries) {
+        const child = join(branch, entry.name);
+        if (!isValidSkillDir(child) && hasDshSkill(child)) {
+          scanBranch(child, `${label} · ${entry.name}`, depth + 1);
+        }
+      }
+    } catch {
+      // Unreadable branches contribute no skills.
+    }
+  };
+
+  scanBranch(skillsRoot, workspaceLabel, 0);
+  return skills;
+}
+
+function hasDshSkill(dir: string, depth = 0): boolean {
+  if (depth > 4) return false;
+  if (isValidSkillDir(dir)) return true;
+  try {
+    return readdirSync(dir, { withFileTypes: true }).some(
+      (entry) =>
+        (entry.isDirectory() || entry.isSymbolicLink()) &&
+        !entry.name.startsWith(".") &&
+        hasDshSkill(join(dir, entry.name), depth + 1),
+    );
+  } catch {
+    return false;
+  }
 }
 
 export function invalidateSkillsCache(): void {

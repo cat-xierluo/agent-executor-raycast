@@ -1,6 +1,6 @@
 # Agent Executor Raycast Extension
 
-使用 Raycast Extension API 执行 Claude Code 技能（Skills）的通用工具。
+使用 Raycast Extension API 执行 Claude Code、CodeBuddy、Hermes 或 DeepSeek Harness 技能（Skills）的通用工具。
 
 ## ✨ 核心特性
 
@@ -26,6 +26,13 @@
 - **全局 Skills 支持**: 同时支持扫描 `~/.claude/skills/` 目录中的全局 Skills
 - **无需硬编码**: 添加、修改或删除技能无需修改代码
 - **智能提取**: 自动从 SKILL.md 文件中提取标题、描述和图标
+
+### 🐋 DeepSeek Harness 后端
+
+- 选择 DSH 后端后，后台/流式执行走官方 `dsh --profile headless --json`，保留 DSH 原生 Session ID、工具进度和最终回复
+- 模型配置从 `~/.dsh/profiles/<dshConfigProfile>/cordis.patch.yml`（默认 `desktop`）继承，执行仍使用官方 headless profile
+- 会话保存到与 Desktop/Web 相同的 DSH 会话库；在 Desktop 中刷新/重连后，于相同工作区回看
+- 扫描项目 `.dsh/skills`、`.agents/skills`、`.claude/skills` 及用户级 `.dsh/skills`、`.agents/skills`
 
 ### 📋 技能管理原则
 
@@ -54,6 +61,7 @@ agent-executor-raycast/
 │   ├── utils/
 │   │   ├── skills.ts          # Skills 扫描逻辑
 │   │   ├── claude.ts          # Claude Code CLI 执行（含流式输出）
+│   │   ├── deepseek.ts        # DeepSeek Harness headless 适配
 │   │   ├── commandMetadata.ts # 技能元数据管理
 │   │   ├── devonthink.ts      # DEVONthink 集成
 │   │   ├── logger.ts          # JSONL 日志记录
@@ -70,9 +78,9 @@ agent-executor-raycast/
 
 在使用本扩展之前，你需要：
 
-1. **安装 Claude Code CLI**
+1. **安装所需执行后端 CLI**
 
-   本扩展依赖 Claude Code CLI 来执行技能。请确保已安装并配置好 Claude Code CLI。
+   本扩展默认支持 Claude Code；也可在设置或主界面中选择 CodeBuddy、Hermes 或 DeepSeek Harness。选择 DSH 时需安装官方 `dsh`（默认路径 `~/.local/bin/dsh`），并已在 DSH Desktop/Web 中完成模型配置与登录。
 
    ```bash
    # 检查 Claude CLI 是否已安装
@@ -94,6 +102,10 @@ agent-executor-raycast/
    - **项目目录**：包含 `.claude/skills/` 的项目路径
    - **启用默认 Skills 目录**：自动扫描 `~/.claude/skills/`（默认开启）
    - **Claude CLI 路径**（可选）：如果 CLI 不在默认路径 `~/.local/bin/claude`
+   - **DSH CLI 路径**（可选）：默认 `~/.local/bin/dsh`
+   - **DSH 模型配置来源**（可选）：默认 `desktop`，可填 `web`、`next` 等 `~/.dsh/profiles/` 下的 profile 名；扩展只复制其中模型/搜索配置，不加载整套 UI 插件
+
+> DSH 注意：外部 headless 进程不会把实时进度推送进已连接的 Desktop 窗口；任务完成后刷新/重连 Desktop，在相同工作区的会话列表回看。DSH 后端不支持弹 Terminal 的可视化模式。
 
 ## 🚀 快速开始
 

@@ -1,4 +1,10 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  readdirSync,
+  mkdirSync,
+} from "fs";
 import { join, basename } from "path";
 import { homedir } from "os";
 import { LocalStorage } from "@raycast/api";
@@ -31,13 +37,15 @@ export function getSelectedHermesProfileSync(): string {
  */
 const ACTIVE_BACKEND_FILE = join(homedir(), ".hermes", "active-backend");
 
-export type PersistableBackend = "claude" | "codebuddy" | "hermes";
+export type PersistableBackend = "claude" | "codebuddy" | "hermes" | "dsh";
 
 export function getSelectedBackendSync(): PersistableBackend | undefined {
   try {
     if (!existsSync(ACTIVE_BACKEND_FILE)) return undefined;
     const v = readFileSync(ACTIVE_BACKEND_FILE, "utf-8").trim();
-    return v === "claude" || v === "codebuddy" || v === "hermes" ? v : undefined;
+    return v === "claude" || v === "codebuddy" || v === "hermes" || v === "dsh"
+      ? v
+      : undefined;
   } catch {
     return undefined;
   }
@@ -45,6 +53,7 @@ export function getSelectedBackendSync(): PersistableBackend | undefined {
 
 export function writeSelectedBackendSync(backend: PersistableBackend): void {
   try {
+    mkdirSync(join(homedir(), ".hermes"), { recursive: true });
     writeFileSync(ACTIVE_BACKEND_FILE, backend, "utf-8");
   } catch {
     // 写失败不致命：本次会话内存态仍生效，只是重开回落偏好默认
@@ -80,7 +89,8 @@ export async function getSelectedHermesProfile(): Promise<string> {
   const fromFile = getSelectedHermesProfileSync();
   if (fromFile) return fromFile;
   try {
-    const legacy = ((await LocalStorage.getItem(SELECTED_PROFILE_KEY)) as string) || "";
+    const legacy =
+      ((await LocalStorage.getItem(SELECTED_PROFILE_KEY)) as string) || "";
     if (legacy) {
       // 旧数据迁移：写入快路径文件，下次同步可读
       try {

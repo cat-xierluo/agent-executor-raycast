@@ -50,6 +50,8 @@ export interface LogEntry {
   pid?: number;
   output?: string;
   outputFile?: string; // 临时输出文件路径，用于 PID 检测恢复
+  sessionId?: string;
+  backend?: string;
 }
 
 function ensureLogDirs() {
@@ -328,6 +330,13 @@ ${this.pid ? `进程 PID: ${this.pid}` : "进程 PID: 启动中..."}
       this.setLogHeader();
       this.headerWritten = true;
     }
+  }
+
+  logSession(sessionId: string, backend: string): void {
+    writeJsonLog("session", "running", this.runId, {
+      session_id: sessionId,
+      backend,
+    });
   }
 
   logCompleted(
