@@ -1,12 +1,16 @@
 import { spawn } from "child_process";
 import {
+  closeSync,
   existsSync,
+  openSync,
+  readSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync,
   writeFileSync,
   appendFileSync,
+  statSync,
 } from "fs";
 import { homedir, tmpdir } from "os";
 import { dirname, join } from "path";
@@ -115,6 +119,10 @@ export interface DshRunState {
   reason?: string;
   error?: string;
   preview?: string;
+  /** Whether the run ended because the Harness tore the Agent down. */
+  disposed?: boolean;
+  /** Whether the run was cut short instead of reaching a real result. */
+  interrupted?: boolean;
 }
 
 export function consumeDshEvent(line: string, state: DshRunState): string {
@@ -139,6 +147,14 @@ export function consumeDshEvent(line: string, state: DshRunState): string {
       if (event.phase === "turn_end") {
         state.reason =
           typeof event.reason === "string" ? event.reason : event.reason?.kind;
+        if (state.reason === "aborted") {
+          state.interrupted = true;
+          const cause =
+            event.reason && typeof event.reason === "object"
+              ? (event.reason.reason?.kind ?? event.reason.cause?.kind)
+              : undefined;
+          state.disposed = cause === "disposed";
+        }
         if (
           state.reason === "error" &&
           typeof event.reason?.message === "string"
@@ -183,6 +199,15 @@ export function dshRunSucceeded(state: DshRunState, code: number): boolean {
   );
 }
 
+/**
+ * Whether a run ended by Harness teardown rather than by a real failure.
+ * A torn-down Agent reports `aborted` with a `disposed` cause: the session
+ * log survives and can be resumed, so the caller may retry it once.
+ */
+export function dshRunWasDisposed(state: DshRunState): boolean {
+  return state.interrupted === true && state.final !== true;
+}
+
 type DshLogger = {
   startRealtimeLogging: () => void;
   logRealtime: (chunk: string) => void;
@@ -201,9 +226,10 @@ function withLauncherPath(
       (dir, index, dirs) =>
         dirs.indexOf(dir) === index && existsSync(join(dir, "node")),
     );
+    const pathEntries = [...nodeDirs, "/usr/bin:/bin"];
     return {
       ...env,
-      PATH: [...nodeDirs, env.PATH].filter(Boolean).join(":"),
+      PATH: [...pathEntries, env.PATH].filter(Boolean).join(":"),
     };
   } catch {
     return env;
@@ -231,7 +257,6 @@ export async function executeDsh(
     );
     runDir = mkdtempSync(join(tmpdir(), "raycast-dsh-"));
     const patchFile = join(runDir, "provider.patch.yml");
-    const outputFile = join(runDir, "output.jsonl");
     const skillContent =
       options.skillContent ||
       (options.skillFile
@@ -239,109 +264,198 @@ export async function executeDsh(
         : undefined);
     const prompt = buildDshPrompt(options.prompt, preamble, skillContent);
     writeFileSync(patchFile, patch, { mode: 0o600 });
-    writeFileSync(outputFile, "", { mode: 0o600 });
     // Stdin avoids argv size limits for full SKILL.md content.
     const args = ["--profile", "headless", "--patch", patchFile, "--json"];
 
     const ownedDir = runDir;
-    return await new Promise<ClaudeExecutionResult>((resolve) => {
-      const state: DshRunState = { final: false };
-      const decoder = new StringDecoder("utf8");
-      let buffer = "";
-      let stderr = "";
-      let settled = false;
-      const onChunk = "onChunk" in options ? options.onChunk : undefined;
-      logger?.startRealtimeLogging();
-      const child = spawn(binary, args, {
-        cwd: options.projectDir,
-        env: withLauncherPath(binary, env),
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      const finish = (code: number, error?: string) => {
-        if (settled) return;
-        settled = true;
-        if (timeoutTimer) clearTimeout(timeoutTimer);
-        const success = !error && dshRunSucceeded(state, code);
-        const failure =
-          error ||
-          state.error ||
-          stderr.trim() ||
-          (state.reason && state.reason !== "completed"
-            ? `DSH 任务未完成：${state.reason}`
-            : "DSH 未返回完整的会话、完成状态及 final 事件");
-        const output = success
-          ? state.answer || "(任务完成，无文字回复)"
-          : [state.answer, failure].filter(Boolean).join("\n");
-        // final is lossless; text events can be capped at 8 KiB by DSH.
-        if (!success || state.preview !== state.answer) {
-          logger?.logRealtime(`\n${output}\n`);
-          onChunk?.(success ? state.answer || "" : failure, false);
-        }
-        onChunk?.("", true);
-        resolve({
-          success,
-          output,
-          error: success ? undefined : failure,
-          exitCode: success ? 0 : code || 1,
-          duration: Date.now() - start,
-          pid: child.pid,
-          sessionId: state.sessionId,
-          apiSuccess: success,
+    // Each attempt gets its own files: a resume must not re-read the aborted
+    // attempt's events or inherit its shutdown diagnostics.
+    let runIndex = 0;
+    const runOnce = (resume?: { sessionId: string }): Promise<{
+      result: ClaudeExecutionResult;
+      state: DshRunState;
+    }> =>
+      new Promise((resolve) => {
+        // A resume appends one turn to the same durable session instead of
+        // starting a second conversation, so the transcript stays one story.
+        const runArgs = resume
+          ? [...args, "--session-id", resume.sessionId]
+          : args;
+        const runPrompt = resume ? "继续" : prompt;
+        const outputFile = join(ownedDir, `output-${++runIndex}.jsonl`);
+        const stderrFile = join(ownedDir, `stderr-${runIndex}.log`);
+        writeFileSync(outputFile, "", { mode: 0o600 });
+        writeFileSync(stderrFile, "", { mode: 0o600 });
+        const state: DshRunState = { final: false };
+        const decoder = new StringDecoder("utf8");
+        let buffer = "";
+        let offset = 0;
+        let stderr = "";
+        let settled = false;
+        let endedBySignal: NodeJS.Signals | undefined;
+        let exitFallbackTimer: NodeJS.Timeout | undefined;
+        let pollTimer: NodeJS.Timeout | undefined;
+        const onChunk = "onChunk" in options ? options.onChunk : undefined;
+        logger?.startRealtimeLogging();
+
+        // Stdout/stderr go to files instead of pipes: a pipe ties the child's
+        // lifetime to this process (EPIPE once Raycast tears us down), while a
+        // file keeps the run alive and lets a later status page read it back.
+        const outFd = openSync(outputFile, "a");
+        const errFd = openSync(stderrFile, "a");
+        const child = spawn(binary, runArgs, {
+          cwd: options.projectDir,
+          env: withLauncherPath(binary, env),
+          // Own process group, so a group signal aimed at the Raycast command
+          // process never reaches this task.
+          detached: true,
+          stdio: ["pipe", outFd, errFd],
         });
-        rmSync(ownedDir, { recursive: true, force: true });
-      };
-      const line = (value: string) => {
-        const previous = state.sessionId;
-        const display = consumeDshEvent(value, state);
-        if (state.sessionId && state.sessionId !== previous) {
-          logger?.logSession?.(state.sessionId, "dsh");
-        }
-        if (display) {
-          logger?.logRealtime(display);
-          onChunk?.(display, false);
-        }
-      };
-      if (child.pid) options.onPid?.(child.pid);
-      const timeoutTimer = setTimeout(
-        () => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            // The child may already have exited; close still settles the run.
+        closeSync(outFd);
+        closeSync(errFd);
+
+        const finish = (code: number, error?: string) => {
+          if (settled) return;
+          settled = true;
+          if (pollTimer) clearInterval(pollTimer);
+          if (timeoutTimer) clearTimeout(timeoutTimer);
+          if (exitFallbackTimer) clearTimeout(exitFallbackTimer);
+          // A killed child leaves no `turn_end` on stdout: the wrapper exits
+          // with a status instead of a signal, and its shutdown prints a
+          // known flush artifact. Treat both as "cut short", not as failure.
+          if (endedBySignal !== undefined) state.interrupted = true;
+          if (
+            state.final !== true &&
+            /flush on a closed handle/i.test(stderr)
+          ) {
+            state.interrupted = true;
           }
-          finish(124, "DSH 执行超时（超过 30 分钟，已强制终止）");
-        },
-        30 * 60 * 1000,
+          const success = !error && dshRunSucceeded(state, code);
+          const failure =
+            error ||
+            state.error ||
+            stderr.trim() ||
+            (state.reason && state.reason !== "completed"
+              ? `DSH 任务未完成：${state.reason}`
+              : "DSH 未返回完整的会话、完成状态及 final 事件");
+          const output = success
+            ? state.answer || "(任务完成，无文字回复)"
+            : [state.answer, failure].filter(Boolean).join("\n");
+          // final is lossless; text events can be capped at 8 KiB by DSH.
+          if (!success || state.preview !== state.answer) {
+            logger?.logRealtime(`\n${output}\n`);
+            onChunk?.(success ? state.answer || "" : failure, false);
+          }
+          onChunk?.("", true);
+          resolve({
+            state,
+            result: {
+              success,
+              output,
+              error: success ? undefined : failure,
+              exitCode: success ? 0 : code || 1,
+              duration: Date.now() - start,
+              pid: child.pid,
+              sessionId: state.sessionId,
+              apiSuccess: success,
+            },
+          });
+        };
+        const line = (value: string) => {
+          const previous = state.sessionId;
+          const display = consumeDshEvent(value, state);
+          if (state.sessionId && state.sessionId !== previous) {
+            logger?.logSession?.(state.sessionId, "dsh");
+          }
+          if (display) {
+            logger?.logRealtime(display);
+            onChunk?.(display, false);
+          }
+        };
+        const drainOutput = () => {
+          try {
+            const size = statSync(outputFile).size;
+            if (size <= offset) return;
+            const chunk = Buffer.alloc(size - offset);
+            const fd = openSync(outputFile, "r");
+            try {
+              readSync(fd, chunk, 0, chunk.length, offset);
+            } finally {
+              closeSync(fd);
+            }
+            offset = size;
+            buffer += decoder.write(chunk);
+          } catch {
+            // The child may not have flushed yet; the next poll reads the rest.
+            return;
+          }
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          lines.forEach(line);
+        };
+        const readStderr = () => {
+          try {
+            stderr = readFileSync(stderrFile, "utf8");
+          } catch {
+            // Missing stderr is normal for a clean run.
+          }
+        };
+        if (child.pid) options.onPid?.(child.pid);
+        const timeoutTimer = setTimeout(
+          () => {
+            try {
+              process.kill(-child.pid!, "SIGKILL");
+            } catch {
+              // The child may already have exited; close still settles the run.
+            }
+            finish(124, "DSH 执行超时（超过 30 分钟，已强制终止）");
+          },
+          30 * 60 * 1000,
+        );
+        timeoutTimer.unref?.();
+        logger?.logExecuting?.(options.prompt, child.pid, outputFile);
+        child.on("error", (error) => finish(1, error.message));
+        child.on("exit", (code, signal) => {
+          if (signal) endedBySignal = signal;
+          const message = signal
+            ? `DSH 进程被 ${signal} 终止`
+            : undefined;
+          exitFallbackTimer = setTimeout(() => {
+            drainOutput();
+            readStderr();
+            finish(code ?? 1, message);
+          }, 500);
+          exitFallbackTimer.unref?.();
+        });
+        child.on("close", (code, signal) => {
+          if (signal) endedBySignal = signal;
+          drainOutput();
+          readStderr();
+          finish(code ?? 1, signal ? `DSH 进程被 ${signal} 终止` : undefined);
+        });
+        child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+          if (error.code !== "EPIPE") state.error = error.message;
+        });
+        pollTimer = setInterval(drainOutput, 200);
+        child.stdin.end(runPrompt);
+        // The task outlives this process; Raycast may reclaim us at any time.
+        child.unref?.();
+      });
+
+    const first = await runOnce();
+    let finalResult = first.result;
+    // Harness teardown reports `aborted` with a `disposed` cause while the
+    // session log stays intact, so resume that same session exactly once.
+    if (!first.result.success && dshRunWasDisposed(first.state) && first.state.sessionId) {
+      logger?.logRealtime(
+        "\n[检测到会话被中断，正在用同一会话自动续跑一次]\n",
       );
-      timeoutTimer.unref?.();
-      logger?.logExecuting?.(options.prompt, child.pid, outputFile);
-      child.stdout.on("data", (chunk: Buffer) => {
-        appendFileSync(outputFile, chunk);
-        buffer += decoder.write(chunk);
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-        lines.forEach(line);
-      });
-      child.stdout.on("end", () => {
-        buffer += decoder.end();
-        if (buffer.trim()) line(buffer);
-        buffer = "";
-      });
-      child.stderr.on("data", (chunk: Buffer) => {
-        const text = chunk.toString();
-        stderr += text;
-        logger?.logRealtime(text);
-        onChunk?.(text, false);
-      });
-      child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-        if (error.code !== "EPIPE") state.error = error.message;
-      });
-      child.on("error", (error) => finish(1, error.message));
-      child.on("close", (code, signal) =>
-        finish(code ?? 1, signal ? `DSH 进程被 ${signal} 终止` : undefined),
-      );
-      child.stdin.end(prompt);
-    });
+      finalResult = (
+        await runOnce({ sessionId: first.state.sessionId })
+      ).result;
+    }
+    rmSync(ownedDir, { recursive: true, force: true });
+    return finalResult;
   } catch (error) {
     if (runDir) rmSync(runDir, { recursive: true, force: true });
     const message = error instanceof Error ? error.message : String(error);

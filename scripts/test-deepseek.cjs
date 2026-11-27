@@ -110,19 +110,40 @@ const fs = require("fs");
 const assert = require("assert/strict");
 assert.deepEqual(process.argv.slice(2, 5), ["--profile", "headless", "--patch"]);
 assert.equal(process.argv[6], "--json");
+const pgid = require("child_process")
+  .execSync("ps -o pgid= -p " + process.pid)
+  .toString()
+  .trim();
+assert.equal(pgid, String(process.pid), "child must own its process group");
+assert.ok(process.env.PATH.includes("/usr/bin:/bin"));
 const patch = fs.readFileSync(process.argv[5], "utf8");
 assert.match(patch, /defaultPreset: danger-full-access/);
 let prompt = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", x => prompt += x);
 process.stdin.on("end", () => {
-  assert.match(prompt, /preamble/);
-  assert.match(prompt, /skill-body/);
-  assert.match(prompt, /literal \\$\\(echo unsafe\\)/);
+  const isResume = process.argv.includes("--session-id");
+  if (isResume) {
+    assert.equal(process.argv[7], "--session-id");
+    assert.equal(process.argv[8], "session-fixture");
+    assert.equal(prompt, "继续");
+  } else {
+    assert.match(prompt, /preamble/);
+    assert.match(prompt, /skill-body/);
+    assert.match(prompt, /literal \\$\\(echo unsafe\\)/);
+  }
   const emit = x => process.stdout.write(JSON.stringify(x) + "\\n");
   emit({type:"session", sessionId:"session-fixture", cwd:process.cwd()});
   emit({type:"tool_call", tool:"read"});
   if (process.env.TEST_MODE === "crash") process.exit(2);
+  if (process.env.TEST_MODE === "orphan-pipe") {
+    require("child_process").spawn(process.execPath, ["-e", "setTimeout(() => {}, 1500)"], {stdio: ["ignore", "inherit", "inherit"]});
+    process.exit(0);
+  }
+  if (process.env.TEST_MODE === "disposed" && !isResume) {
+    emit({type:"status", phase:"turn_end", reason:{kind:"aborted", reason:{kind:"disposed"}}});
+    process.exit(0);
+  }
   emit({type:"status", phase:"turn_end", reason:{kind:process.env.TEST_MODE === "failed" ? "error" : "completed"}});
   if (process.env.TEST_MODE === "missing-final") process.exit(0);
   const text = JSON.stringify({type:"text", text:"中文结果"}) + "\\n";
@@ -144,8 +165,21 @@ process.stdin.on("end", () => {
     skillContent: "skill-body",
     prompt: "literal $(echo unsafe)",
   };
-  const env = { ...process.env, DSH_HOME: temp, PATH: "" };
-  for (const mode of ["ok", "long", "failed", "crash", "missing-final"]) {
+  const env = {
+    ...process.env,
+    DSH_HOME: temp,
+    PATH: "",
+    DSH_TEST_DETACHED: "1",
+  };
+  for (const mode of [
+    "ok",
+    "long",
+    "failed",
+    "crash",
+    "orphan-pipe",
+    "missing-final",
+    "disposed",
+  ]) {
     const chunks = [];
     const sessions = [];
     const result = await dsh.executeDsh(
@@ -160,11 +194,24 @@ process.stdin.on("end", () => {
         },
       },
     );
-    assert.equal(result.sessionId, "session-fixture");
-    assert.deepEqual(sessions, ["session-fixture"]);
-    assert.equal(chunks.filter((c) => c.final).length, 1);
-    assert.equal(result.success, mode === "ok" || mode === "long");
-    assert.equal(result.apiSuccess, result.success);
+    assert.equal(result.sessionId, "session-fixture", result.output);
+    assert.deepEqual(
+      sessions,
+      mode === "disposed"
+        ? ["session-fixture", "session-fixture"]
+        : ["session-fixture"],
+    );
+    assert.equal(chunks.filter((c) => c.final).length, mode === "disposed" ? 2 : 1);
+    assert.equal(
+      result.success,
+      mode === "ok" || mode === "long" || mode === "disposed",
+      `mode=${mode} output=${result.output}`,
+    );
+    assert.equal(result.apiSuccess, result.success, `mode=${mode}`);
+    if (mode === "disposed") {
+      assert.equal(result.exitCode, 0);
+      assert.match(result.output, /中文结果/);
+    }
     if (mode === "ok") {
       assert.equal(result.output, "中文结果");
       assert.equal(chunks.filter((c) => c.text === "中文结果\n").length, 1);
@@ -219,7 +266,7 @@ process.stdin.on("end", () => {
   dsh.consumeDshEvent('{"type":"final","text":""}', state);
   assert.equal(state.final, true);
   console.log(
-    "PASS: DSH config isolation, native argv/stdin, UTF-8, final integrity, failure/early exit, both execution entry points",
+    "PASS: DSH config isolation, native argv/stdin, UTF-8, final integrity, failure/early/orphan-pipe exit, both execution entry points",
   );
 }
 
