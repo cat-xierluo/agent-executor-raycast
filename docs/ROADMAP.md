@@ -157,6 +157,7 @@
 | DSH Bot Workspace 迁移          | 动态扫描和选择 `~/.dsh/bot/workspace/`，递归读取 bot skills 并切换运行目录          | 🔴 高  | ✅   | 2026-11-17 |
 | DSH 无头会话实时归组           | 用 `dsh-session-adopt` 让外部 headless 会话免重启出现并自动归入对应 Workspace   | 🔴 高  | ✅   | 2026-11-18 |
 | DSH 无人值守任务不再被打断      | 子进程独立进程组 + 文件型输出，Raycast 回收不再杀任务；中断后自动续跑一次        | 🔴 高  | ✅   | 2026-11-27 |
+| DSH 技能调用提示词精简          | 只给技能目录路径，不再注入 SKILL.md 全文；同时避免误读技能备份目录                | 🟡 中  | ✅   | 2026-11-28 |
 
 ### 已完成专项
 
@@ -230,6 +231,21 @@
   - [x] 对运行中的子进程发 SIGTERM，扩展自动用 `--session-id` 续跑同一会话并返回成功。
   - [x] `node scripts/test-deepseek.cjs`（含新增独立进程组断言、`disposed` 用例、续跑断言）、`npm run typescript`、`npm run build` 通过；`npm run dev` 已触发 Raycast 重载。
 - 遗留边界：父进程被杀后，本次运行的状态记录无人结算，状态页需等下次刷新按日志/进程存活度对账；`detached` 子进程若被单独 kill 其 PID，其子任务（如 bash）可能残留。
+
+#### DSH-05：DSH 技能调用提示词精简（2026-11-28）
+
+- 来源：用户查看会话 `session-f74f0e7e-8eff-44e1-a74f-dcd08a65a89e` 的首条消息后，指出初始命令过长——整份 `SKILL.md` 被拼进了提示词。
+- 状态：✅ 已完成；实施 owner：本会话 Codex，独立工作树 `dsh-skill-path`（稀疏检出 src/scripts/docs），主目录保持不动。
+- 范围：只改 DSH 执行器的技能提示拼装与对应回归；未改其他后端（Hermes/Claude Code/CodeBuddy）的技能注入方式，未改 bot workspace 技能内容。
+- 现状核对：该会话首条 `user/message` 7131 字符，其中技能全文约 6000 字符；`executeDsh` 通过 `options.skillFile` 读取 `SKILL.md` 全文并拼入提示词。
+- 验收清单：
+  - [x] 新增 `buildDshSkillHint()`：只给技能名、技能目录与「不要使用副本或备份」的约束。
+  - [x] 回归新增「提示词不含正文」与「技能提示长度上限」断言，原断言同步调整。
+  - [x] 真实调用：首条消息 358 字符（原 7131），`success: true`，回复 `compress.py`。
+  - [x] 路径核对：该会话工具序列为 `skill` → `glob(指定目录)` → `read(skills/video-compressor/SKILL.md)`，只读正式目录，未触碰备份目录。
+  - [x] `node scripts/test-deepseek.cjs`、`npm run typescript`、`npm run build` 通过。
+- 附带修掉的隐患：`skills-copy-backup-20261115/video-compressor/` 与正式 `skills/video-compressor/` 内容不同（`SKILL.md` 12189 vs 11165 字节，`compress.py` 14841 vs 13904 字节）；模型自行 glob 时曾命中备份目录。指明目录后已不复现。
+- 遗留边界：技能若被移出该目录则提示词会指向失效路径；工作区内若存在同名技能副本，仍以扩展选中的 `skillFile` 为准。
 - Lint：`npm run lint` 仍因既有 `select-profile.tsx`、`devonthink.ts` 格式问题失败并保留 19 条既有警告；DSH 新增文件在修复 `prefer-const` 后无 lint error。
 - UI：主目录版本重载后显示 `Agent Executor · DeepSeek Harness`，DSH 技能扫描为 39 项；在 Raycast 内选择“自由指令”实际执行成功，状态页显示成功、11 秒、PID 2331、退出码 0 与完整 Session ID。
 - 边界：外部 headless 进程不会实时推送进度到已连接 Desktop；需刷新/重连后在相同工作区查看。`dsh://open` 只能聚焦 Desktop，不能直达指定会话。可视化 Terminal 模式不支持 DSH。

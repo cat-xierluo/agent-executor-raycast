@@ -13,7 +13,7 @@ import {
   statSync,
 } from "fs";
 import { homedir, tmpdir } from "os";
-import { dirname, join } from "path";
+import { basename, dirname, join } from "path";
 import { StringDecoder } from "string_decoder";
 import { Document, isAlias, isMap, isSeq, parseDocument, visit } from "yaml";
 import type {
@@ -98,18 +98,35 @@ export function buildDshPatch(
 export function buildDshPrompt(
   prompt: string,
   preamble?: string,
-  skillContent?: string,
+  skillHint?: string,
 ): string {
   return [
     `Raycast: ${prompt.split("\n")[0].slice(0, 160)}`,
     preamble,
-    skillContent?.trim()
-      ? `${skillContent.trim()}\n\n---\n\n# 本次任务`
+    skillHint?.trim()
+      ? `${skillHint.trim()}\n\n---\n\n# 本次任务`
       : undefined,
     prompt,
   ]
     .filter(Boolean)
     .join("\n\n");
+}
+
+/**
+ * Point the agent at the skill directory instead of pasting SKILL.md into the
+ * prompt. The headless profile has no `--skill` flag, but DSH resolves a
+ * leading `/name` through its own skill tool; naming the exact directory also
+ * keeps the agent off stale sibling copies such as skill backups.
+ * @param skillFile - Resolved `SKILL.md` path of the selected skill.
+ * @returns A short instruction naming the skill and its directory.
+ */
+export function buildDshSkillHint(skillFile: string): string {
+  const skillDir = dirname(skillFile);
+  return [
+    `本次任务使用技能 \`${basename(skillDir)}\`。`,
+    `技能目录：${skillDir}。请先用 skill 工具加载它；若不可用，直接读取该目录下的 SKILL.md。`,
+    "技能内引用的相对路径均相对该目录解析，不要使用其他位置的副本或备份。",
+  ].join("\n");
 }
 
 export interface DshRunState {
@@ -257,12 +274,10 @@ export async function executeDsh(
     );
     runDir = mkdtempSync(join(tmpdir(), "raycast-dsh-"));
     const patchFile = join(runDir, "provider.patch.yml");
-    const skillContent =
-      options.skillContent ||
-      (options.skillFile
-        ? `[技能目录：${dirname(options.skillFile)}。相对路径均相对该目录解析。]\n\n${readFileSync(options.skillFile, "utf8")}`
-        : undefined);
-    const prompt = buildDshPrompt(options.prompt, preamble, skillContent);
+    const skillHint = options.skillFile
+      ? buildDshSkillHint(options.skillFile)
+      : undefined;
+    const prompt = buildDshPrompt(options.prompt, preamble, skillHint);
     writeFileSync(patchFile, patch, { mode: 0o600 });
     // Stdin avoids argv size limits for full SKILL.md content.
     const args = ["--profile", "headless", "--patch", patchFile, "--json"];

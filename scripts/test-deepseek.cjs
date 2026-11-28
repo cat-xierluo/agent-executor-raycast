@@ -129,7 +129,7 @@ process.stdin.on("end", () => {
     assert.equal(prompt, "继续");
   } else {
     assert.match(prompt, /preamble/);
-    assert.match(prompt, /skill-body/);
+    assert.doesNotMatch(prompt, /skill-body/, "SKILL.md body must not be embedded");
     assert.match(prompt, /literal \\$\\(echo unsafe\\)/);
   }
   const emit = x => process.stdout.write(JSON.stringify(x) + "\\n");
@@ -162,7 +162,6 @@ process.stdin.on("end", () => {
     workDir: temp,
     dshBin: fake,
     dshConfigProfile: "desktop",
-    skillContent: "skill-body",
     prompt: "literal $(echo unsafe)",
   };
   const env = {
@@ -265,8 +264,71 @@ process.stdin.on("end", () => {
   assert.equal(dsh.dshRunSucceeded(state, 0), false);
   dsh.consumeDshEvent('{"type":"final","text":""}', state);
   assert.equal(state.final, true);
+
+  // A skill run names the skill directory only: no SKILL.md body in the prompt.
+  const skillDir = path.join(temp, "skills", "video-compressor");
+  fs.mkdirSync(skillDir, { recursive: true });
+  const skillFile = path.join(skillDir, "SKILL.md");
+  const skillBody = "SKILL_BODY_MARKER do not embed me ".repeat(200).trim();
+  fs.writeFileSync(skillFile, `---\nname: video-compressor\n---\n\n${skillBody}\n`);
+  const skillHint = dsh.buildDshSkillHint(skillFile);
+  assert.match(skillHint, /技能目录：.*skills\/video-compressor/);
+  assert.match(skillHint, /SKILL\.md/);
+  assert.doesNotMatch(skillHint, /SKILL_BODY_MARKER/);
+  const skillPrompt = dsh.buildDshPrompt(
+    "/video-compressor input.mp4",
+    "preamble",
+    skillHint,
+  );
+  assert.match(skillPrompt, /\/video-compressor input\.mp4/);
+  assert.match(skillPrompt, /# 本次任务/);
+  assert.doesNotMatch(skillPrompt, /SKILL_BODY_MARKER/);
+  assert.ok(
+    skillPrompt.length < 1200,
+    `skill prompt should stay short, got ${skillPrompt.length} chars`,
+  );
+
+  let skillRunPrompt = "";
+  fs.writeFileSync(
+    path.join(temp, "dsh-skill.skill.js"),
+    `#!${process.execPath}
+let prompt = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", x => prompt += x);
+process.stdin.on("end", () => {
+  require("fs").writeFileSync(process.env.SKILL_PROMPT_OUT, prompt);
+  const emit = x => process.stdout.write(JSON.stringify(x) + "\\n");
+  emit({type:"session", sessionId:"session-skill"});
+  emit({type:"status", phase:"turn_end", reason:{kind:"completed"}});
+  emit({type:"final", text:"中文结果"});
+});
+`,
+    { mode: 0o700 },
+  );
+  fs.writeFileSync(
+    path.join(temp, "dsh-skill"),
+    `#!/bin/sh
+exec node "$0.skill.js" "$@"
+`,
+    { mode: 0o700 },
+  );
+  const skillPromptOut = path.join(temp, "skill-prompt.txt");
+  const skillResult = await dsh.executeDsh(
+    {
+      ...base,
+      dshBin: path.join(temp, "dsh-skill"),
+      skillFile,
+      prompt: "/video-compressor input.mp4",
+    },
+    { ...env, SKILL_PROMPT_OUT: skillPromptOut },
+    "preamble",
+  );
+  assert.equal(skillResult.success, true, skillResult.output);
+  skillRunPrompt = fs.readFileSync(skillPromptOut, "utf8");
+  assert.match(skillRunPrompt, /技能目录：.*skills\/video-compressor/);
+  assert.doesNotMatch(skillRunPrompt, /SKILL_BODY_MARKER/);
   console.log(
-    "PASS: DSH config isolation, native argv/stdin, UTF-8, final integrity, failure/early/orphan-pipe exit, both execution entry points",
+    "PASS: DSH config isolation, native argv/stdin, UTF-8, final integrity, failure/early/orphan-pipe exit, both execution entry points, skill path hint without body",
   );
 }
 
